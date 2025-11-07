@@ -11,12 +11,12 @@ on:
       - "README.md"
       - ".github/ISSUE_TEMPLATE/**"
     branches:
-      - Alpha
+      - Alpha-smart
     tags:
       - "v*"
   pull_request:
     branches:
-      - Alpha
+      - Alpha-smart
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
@@ -33,20 +33,21 @@ jobs:
     strategy:
       matrix:
         jobs:
-          - { goos: darwin, goarch: amd64, goamd64: v1, output: amd64-compatible } # old style file name will be removed in next released
-          - { goos: darwin, goarch: amd64, goamd64: v3, output: amd64 }
-          - { goos: darwin, goarch: amd64, goamd64: v1, output: amd64-v1 }
+          # - { goos: darwin, goarch: amd64, goamd64: v1, output: amd64-compatible } # old style file name will be removed in next released
+          # - { goos: darwin, goarch: amd64, goamd64: v3, output: amd64 }
+          - { goos: darwin, goarch: amd64, goamd64: v1, output: amd64-v1_compat }
           - { goos: darwin, goarch: amd64, goamd64: v2, output: amd64-v2 }
-          - { goos: darwin, goarch: amd64, goamd64: v3, output: amd64-v3 }
+          - { goos: darwin, goarch: amd64, goamd64: v3, output: amd64-v3_edge }
           - { goos: darwin, goarch: arm64, output: arm64 }
 
           - { goos: linux, goarch: '386', go386: sse2, output: '386', debian: i386, rpm: i386}
           - { goos: linux, goarch: '386', go386: softfloat, output: '386-softfloat' }
-          - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-compatible} # old style file name will be removed in next released
-          - { goos: linux, goarch: amd64, goamd64: v3, output: amd64, debian: amd64, rpm: x86_64, pacman: x86_64}
-          - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1, debian: amd64, rpm: x86_64, pacman: x86_64, test: test }
+          # - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-compatible} # old style file name will be removed in next released
+          # - { goos: linux, goarch: amd64, goamd64: v3, output: amd64, debian: amd64, rpm: x86_64, pacman: x86_64}
+          # - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1_compat, debian: amd64, rpm: x86_64, pacman: x86_64, test: test }
+          - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1_compat, debian: amd64, rpm: x86_64, pacman: x86_64}
           - { goos: linux, goarch: amd64, goamd64: v2, output: amd64-v2, debian: amd64, rpm: x86_64, pacman: x86_64}
-          - { goos: linux, goarch: amd64, goamd64: v3, output: amd64-v3, debian: amd64, rpm: x86_64, pacman: x86_64}
+          - { goos: linux, goarch: amd64, goamd64: v3, output: amd64-v3_edge, debian: amd64, rpm: x86_64, pacman: x86_64}
           - { goos: linux, goarch: arm64, output: arm64, debian: arm64, rpm: aarch64, pacman: aarch64}  
           - { goos: linux, goarch: arm, goarm: '5', output: armv5 }
           - { goos: linux, goarch: arm, goarm: '6', output: armv6, debian: armel, rpm: armv6hl} 
@@ -64,19 +65,19 @@ jobs:
           - { goos: linux, goarch: ppc64le, output: ppc64le, debian: ppc64el, rpm: ppc64le }
 
           - { goos: windows, goarch: '386', output: '386' }
-          - { goos: windows, goarch: amd64, goamd64: v1, output: amd64-compatible } # old style file name will be removed in next released
-          - { goos: windows, goarch: amd64, goamd64: v3, output: amd64 }
-          - { goos: windows, goarch: amd64, goamd64: v1, output: amd64-v1 }
+          # - { goos: windows, goarch: amd64, goamd64: v1, output: amd64-compatible } # old style file name will be removed in next released
+          # - { goos: windows, goarch: amd64, goamd64: v3, output: amd64 }
+          - { goos: windows, goarch: amd64, goamd64: v1, output: amd64-v1_compat }
           - { goos: windows, goarch: amd64, goamd64: v2, output: amd64-v2 }
-          - { goos: windows, goarch: amd64, goamd64: v3, output: amd64-v3 }
+          - { goos: windows, goarch: amd64, goamd64: v3, output: amd64-v3_edge }
           - { goos: windows, goarch: arm64, output: arm64 }
 
           - { goos: freebsd, goarch: '386', output: '386' }
-          - { goos: freebsd, goarch: amd64, goamd64: v1, output: amd64-compatible } # old style file name will be removed in next released
-          - { goos: freebsd, goarch: amd64, goamd64: v3, output: amd64 }
-          - { goos: freebsd, goarch: amd64, goamd64: v1, output: amd64-v1 }
+          # - { goos: freebsd, goarch: amd64, goamd64: v1, output: amd64-compatible } # old style file name will be removed in next released
+          # - { goos: freebsd, goarch: amd64, goamd64: v3, output: amd64 }
+          - { goos: freebsd, goarch: amd64, goamd64: v1, output: amd64-v1_compat }
           - { goos: freebsd, goarch: amd64, goamd64: v2, output: amd64-v2 }
-          - { goos: freebsd, goarch: amd64, goamd64: v3, output: amd64-v3 }
+          - { goos: freebsd, goarch: amd64, goamd64: v3, output: amd64-v3_edge }
           - { goos: freebsd, goarch: arm64, output: arm64 }
 
           - { goos: android, goarch: '386', ndk: i686-linux-android34, output: '386' }
@@ -139,15 +140,23 @@ jobs:
 
           # Go 1.23 is the last release that requires Linux kernel version 2.6.32 or later. Go 1.24 will require Linux kernel version 3.2 or later.
           - { goos: linux, goarch: '386', output: '386-go123', goversion: '1.23' }
-          - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1-go123, goversion: '1.23', test: test }
+          # - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1-go123, goversion: '1.23', test: test }
+          - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1-go123, goversion: '1.23'}
           - { goos: linux, goarch: amd64, goamd64: v2, output: amd64-v2-go123, goversion: '1.23' }
           - { goos: linux, goarch: amd64, goamd64: v3, output: amd64-v3-go123, goversion: '1.23' }
 
+          - { goos: linux, goarch: arm64, output: arm64-go124, debian: arm64, rpm: aarch64, pacman: aarch64, goversion: '1.24'}
+          - { goos: linux, goarch: arm64, output: arm64-go123, debian: arm64, rpm: aarch64, pacman: aarch64, goversion: '1.23'}
+          - { goos: linux, goarch: arm, goarm: '7', output: armv7-go124, debian: armhf, rpm: armv7hl, pacman: armv7hl, goversion: '1.24'}
+          - { goos: linux, goarch: arm, goarm: '7', output: armv7-go123, debian: armhf, rpm: armv7hl, pacman: armv7hl, goversion: '1.23'}
+
           # only for test
           - { goos: linux, goarch: '386', output: '386-go120', goversion: '1.20' }
-          - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1-go120, goversion: '1.20', test: test }
+          # - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1-go120, goversion: '1.20', test: test }
+          - { goos: linux, goarch: amd64, goamd64: v1, output: amd64-v1-go120, goversion: '1.20'}
           - { goos: linux, goarch: amd64, goamd64: v2, output: amd64-v2-go120, goversion: '1.20' }
           - { goos: linux, goarch: amd64, goamd64: v3, output: amd64-v3-go120, goversion: '1.20' }
+
 
     steps:
     - uses: actions/checkout@v5
@@ -240,17 +249,21 @@ jobs:
 
     - name: Set variables
       run: |
-        VERSION="${GITHUB_REF_NAME,,}-smart-$(git rev-parse --short HEAD)"
+        VERSION="${GITHUB_REF_NAME,,}-$(git rev-parse --short HEAD)"
         VERSION="${VERSION//\//-}"
         PackageVersion="$(curl -s "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" | jq -r '.tag_name' | sed 's/v//g' | awk -F '.' '{$NF = $NF + 1; print}' OFS='.').${VERSION/-/.}"
         if [ -n "${{ github.event.inputs.version }}" ]; then
           VERSION=${{ github.event.inputs.version }}
           PackageVersion="${VERSION#v}"
         fi
+        VERSION="${VERSION/-smart/}"
+        PackageVersion="${PackageVersion/.smart/}"
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
-        echo "PackageVersion=${PackageVersion}-smart" >> $GITHUB_ENV
+        echo "VERSION=${VERSION}"
+        echo "PackageVersion=${PackageVersion}" >> $GITHUB_ENV
+        echo "PackageVersion=${PackageVersion}"
       
-        echo "BUILDTIME=$(date)" >> $GITHUB_ENV
+        echo "BUILDTIME=$(TZ=Asia/Jakarta date)" >> $GITHUB_ENV
         echo "CGO_ENABLED=0" >> $GITHUB_ENV
         echo "BUILDTAG=-extldflags --static" >> $GITHUB_ENV
         echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
@@ -269,12 +282,12 @@ jobs:
         echo "CGO_ENABLED=1" >> $GITHUB_ENV
         echo "BUILDTAG=" >> $GITHUB_ENV
 
-    - name: Test
-      if: ${{ matrix.jobs.test == 'test' }}
-      run: |
-        go test ./...
-        echo "---test with_gvisor---"
-        go test ./... -tags "with_gvisor" -count=1
+    # - name: Test
+    #   if: ${{ matrix.jobs.test == 'test' }}
+    #   run: |
+    #     go test ./...
+    #     echo "---test with_gvisor---"
+    #     go test ./... -tags "with_gvisor" -count=1
 
     - name: Update CA
       run: |
@@ -295,10 +308,10 @@ jobs:
         go build -v -tags "with_gvisor" -trimpath -ldflags "${BUILDTAG} -X 'github.com/metacubex/mihomo/constant.Version=${VERSION}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME}' -w -s -buildid="
         if [ "${{matrix.jobs.goos}}" = "windows" ]; then
           cp mihomo.exe mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}.exe
-          zip -r mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.zip mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}.exe
+          zip -r smartclash-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.zip mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}.exe
         else
           cp mihomo mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}
-          gzip -c mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}} > mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.gz
+          gzip -c mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}} > smartclash-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.gz
           rm mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}
         fi
 
@@ -311,7 +324,7 @@ jobs:
 
         fpm -t deb \
           -v "${PackageVersion}" \
-          -p "mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.deb" \
+          -p "smartclash-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.deb" \
           --architecture ${{ matrix.jobs.debian }} \
           mihomo=/usr/bin/mihomo
 
@@ -324,7 +337,7 @@ jobs:
 
         fpm -t rpm \
           -v "${PackageVersion}" \
-          -p "mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.rpm" \
+          -p "smartclash-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.rpm" \
           --architecture ${{ matrix.jobs.rpm }} \
           mihomo=/usr/bin/mihomo
 
@@ -338,7 +351,7 @@ jobs:
 
         fpm -t pacman \
           -v "${PackageVersion}" \
-          -p "mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.pkg.tar.zst" \
+          -p "smartclash-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.pkg.tar.zst" \
           --architecture ${{ matrix.jobs.pacman }} \
           mihomo=/usr/bin/mihomo
 
@@ -352,11 +365,11 @@ jobs:
       with:
         name: "${{ matrix.jobs.goos }}-${{ matrix.jobs.output }}"
         path: |
-          mihomo*.gz
-          mihomo*.deb
-          mihomo*.rpm
-          mihomo*.pkg.tar.zst
-          mihomo*.zip
+          smartclash*.gz
+          smartclash*.deb
+          smartclash*.rpm
+          smartclash*.pkg.tar.zst
+          smartclash*.zip
           version.txt
           checksums.txt
 
@@ -387,7 +400,7 @@ jobs:
         deleteOnlyFromDrafts: false
     - name: Set Env
       run: |
-        echo "BUILDTIME=$(TZ=Asia/Shanghai date)" >> $GITHUB_ENV
+        echo "BUILDTIME=$(TZ=Asia/Jakarta date)" >> $GITHUB_ENV
       shell: bash
 
     - name: Tag Repo
@@ -399,17 +412,15 @@ jobs:
       
     - run: |
         cat > release.txt << 'EOF'
-        **[声明]** 本分支是在上游代码的基础上增加Smart策略组功能，关于Smart策略组的任何问题均与上游无关!
-        **[Announcement]** This branch is based on the upstream code to add Smart Groups functionality, any questions about Smart Groups are not related to the upstream!
+        **[Announcement]** This branch is based on the upstream code to add Smart Groups functionality
+        [Smart Group Introduce](https://github.com/vernesong/OpenClash/releases/tag/mihomo)
 
         Release created at  ${{ env.BUILDTIME }}
         Synchronize ${{ github.ref_name }} branch code updates, keeping only the latest version
         <br>
-        [我应该下载哪个文件? / Which file should I download?](https://github.com/MetaCubeX/mihomo/wiki/FAQ)
-        [二进制文件筛选 / Binary file selector](https://metacubex.github.io/Meta-Docs/startup/#_1)
-        [查看文档 / Docs](https://metacubex.github.io/Meta-Docs/)
-
-        [Smart 策略组使用 / Smart Group Introduce](https://github.com/vernesong/OpenClash/releases/tag/mihomo)
+        [Which file should I download?](https://github.com/MetaCubeX/mihomo/wiki/FAQ)
+        [Binary file selector](https://metacubex.github.io/Meta-Docs/startup/#_1)
+        [Docs](https://metacubex.github.io/Meta-Docs/)
 
         EOF
 
@@ -483,98 +494,3 @@ jobs:
           tag_name: ${{ github.event.inputs.version }}
           files: bin/*
           body_path: release.md
-
-  Docker:
-    if: ${{ !startsWith(github.event_name, 'pull_request') }}
-    permissions: write-all
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: bin/
-          merge-multiple: true
-
-      - name: Display structure of downloaded files
-        run: ls -R
-        working-directory: bin
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Setup Docker buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          version: latest
-      
-      # Extract metadata (tags, labels) for Docker
-      # https://github.com/docker/metadata-action
-      - name: Extract Docker metadata
-        if: ${{ github.event_name != 'workflow_dispatch' }}
-        id: meta_alpha
-        uses: docker/metadata-action@v5
-        with:
-          images: '${{ env.REGISTRY }}/${{ github.repository }}'
-      
-      # Extract metadata (tags, labels) for Docker
-      # https://github.com/docker/metadata-action
-      - name: Extract Docker metadata
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version != '' }}
-        id: meta_release
-        uses: docker/metadata-action@v5
-        with:
-          images: '${{ env.REGISTRY }}/${{ github.repository }}'
-          tags: |
-            ${{ github.event.inputs.version }}
-          flavor: |
-            latest=true
-          labels: org.opencontainers.image.version=${{ github.event.inputs.version }}
-      
-      - name: Show files
-        run: |
-          ls .
-          ls bin/
-      
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Build and push Docker image with Buildx (don't push on PR)
-      # https://github.com/docker/build-push-action
-      - name: Build and push Docker image
-        if: ${{ github.event_name != 'workflow_dispatch' }}
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          platforms: |
-            linux/386
-            linux/amd64
-            linux/arm64
-            linux/arm/v7
-          tags: ${{ steps.meta_alpha.outputs.tags }}
-          labels: ${{ steps.meta_alpha.outputs.labels }}
-      
-      - name: Build and push Docker image
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version != '' }}
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          platforms: |
-            linux/386
-            linux/amd64
-            linux/arm64
-            linux/arm/v7
-          tags: ${{ steps.meta_release.outputs.tags }}
-          labels: ${{ steps.meta_release.outputs.labels }}
