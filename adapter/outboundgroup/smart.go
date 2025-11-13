@@ -1323,7 +1323,9 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 			return
 		}
 		atomicRecord.Add("failure", int64(1))
-		s.onDialFailed(proxy.Type(), err, s.healthCheck)
+		if err != nil {
+			s.onDialFailed(proxy.Type(), err, s.healthCheck)
+		}
 		if s.failedTimes > s.maxFailedTimes {
 			s.store.ClearUnwrapResult(s.Name(), s.configName)
 		}
