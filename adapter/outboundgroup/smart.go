@@ -1280,16 +1280,18 @@ func (s *Smart) collectConnectionData(record *smart.StatsRecord, metadata *C.Met
 	}
 }
 
-func updateAverageValue(oldValue int64, newValue int64, count int64) int64 {
-	var newAverage int64
-
+func updateAverageValueInt(oldValue int64, newValue int64, count int64) int64 {
 	if oldValue > 0 && count > 1 {
-		newAverage = (oldValue*5 + newValue) / 6
-	} else {
-		newAverage = newValue
+		return (oldValue*5 + newValue) / 6
 	}
+	return newValue
+}
 
-	return newAverage
+func updateAverageValueFloat(oldValue, newValue float64, count int64) float64 {
+	if oldValue > 0 && count > 1 {
+		return (oldValue*5 + newValue) / 6
+	}
+	return newValue
 }
 
 func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy C.Proxy,
@@ -1340,13 +1342,13 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 
 	if connectTime > 0 {
 		oldConnectTime := atomicRecord.Get("connectTime").(int64)
-		newConnectTime := updateAverageValue(oldConnectTime, connectTime, connectCount)
+		newConnectTime := updateAverageValueInt(oldConnectTime, connectTime, connectCount)
 		atomicRecord.Set("connectTime", newConnectTime)
 	}
 
 	if latency > 0 {
 		oldLatency := atomicRecord.Get("latency").(int64)
-		newLatency := updateAverageValue(oldLatency, latency, connectCount)
+		newLatency := updateAverageValueInt(oldLatency, latency, connectCount)
 		atomicRecord.Set("latency", newLatency)
 	}
 
@@ -1399,6 +1401,9 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 		isModelPredicted = false
 	}
 
+	// 平均权重(适应 target 调整为 rule based 和 asn based 的情况，避免频繁突变)
+	calculatedWeight = updateAverageValueFloat(oldWeight, calculatedWeight, connectCount)
+
 	// 额外检查和权重调整
 	var degradedWeight float64
 	var isDegraded bool
@@ -1422,18 +1427,13 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 			log.Debugln("[Smart] Connection [%s] - [%s] - [%s] - [%s] detected manual block, degrade weight from %.4f to %.4f",
 				s.Name(), proxy.Name(), weightType, addressDisplay, calculatedWeight, degradedWeight)
 		} else {
-			historyMaxUploadRateKB := atomicRecord.Get("maxUploadRate").(float64)
-			historyMaxDownloadRateKB := atomicRecord.Get("maxDownloadRate").(float64)
-			historyUploadTotal := atomicRecord.Get("uploadTotal").(float64)
-			historyDownloadTotal := atomicRecord.Get("downloadTotal").(float64)
 			status := atomicRecord.Get("status").(int64)
 
 			degradedWeight, isDegraded = s.checkNodeQualityDegradation(
 				metadata, proxy, atomicRecord,
 				addressDisplay, proxy.Name(), calculatedWeight, oldWeight,
 				connectionDuration, uploadTotalMB, downloadTotalMB,
-				maxUploadRateKB, maxDownloadRateKB, historyMaxUploadRateKB, historyMaxDownloadRateKB,
-				historyUploadTotal, historyDownloadTotal, success, weightType,
+				weightType,
 				status, lastUsedVal, target, asnInfo, metadata.NetWork == C.UDP)
 		}
 
@@ -1531,9 +1531,7 @@ func (s *Smart) checkNodeQualityDegradation(
 	newWeight, oldWeight float64,
 	connectionDuration int64,
 	uploadTotal, downloadTotal float64,
-	maxUploadRateKB, maxDownloadRateKB, historyMaxUploadRateKB, historyMaxDownloadRateKB float64,
-	historyUploadTotal, historyDownloadTotal float64,
-	success int64, weightType string, lastStatus int64, lastUsedVal int64,
+	weightType string, lastStatus int64, lastUsedVal int64,
 	target, asnInfo string, isUDP bool) (float64, bool) {
 
 	if asnInfo != "" {
@@ -1613,77 +1611,6 @@ func (s *Smart) checkNodeQualityDegradation(
 
 					go s.cleanupNodePrefetchCache(metadata, target, addressDisplay, updateNodes, updateWeights, asnInfo, isUDP)
 					return degradedWeight, true
-				}
-			}
-		}
-	}
-
-	// 权重显著下降
-	if oldWeight > 0 && success >= 3 {
-		weightChangeRatio := (newWeight - oldWeight) / oldWeight
-
-		var thresholdRatio float64
-		switch {
-		case success >= 300:
-			thresholdRatio = -0.6
-		case success >= 100:
-			thresholdRatio = -0.5
-		case success >= 20:
-			thresholdRatio = -0.4
-		default:
-			thresholdRatio = -0.3
-		}
-
-		if weightChangeRatio < thresholdRatio {
-			avgDownload := 0.0
-			avgUpload := 0.0
-			if success > 0 {
-				avgDownload = historyDownloadTotal / float64(success)
-				avgUpload = historyUploadTotal / float64(success)
-			}
-
-			trafficCompareRatio := 0.3
-			speedCompareRatio := 0.6
-
-			var performanceIssues int = 0
-
-			if avgDownload > 0 && downloadTotal < avgDownload*trafficCompareRatio {
-				performanceIssues++
-			}
-			if avgUpload > 0 && uploadTotal < avgUpload*trafficCompareRatio {
-				performanceIssues++
-			}
-
-			if historyMaxUploadRateKB > 0 && maxUploadRateKB < historyMaxUploadRateKB*speedCompareRatio {
-				performanceIssues++
-			}
-			if historyMaxDownloadRateKB > 0 && maxDownloadRateKB < historyMaxDownloadRateKB*speedCompareRatio {
-				performanceIssues++
-			}
-
-			if performanceIssues >= 2 {
-				var adjustmentFactor float64
-				switch {
-				case weightChangeRatio < -0.7:
-					adjustmentFactor = 0.7
-				case weightChangeRatio < -0.6:
-					adjustmentFactor = 0.75
-				case weightChangeRatio < -0.5:
-					adjustmentFactor = 0.8
-				default:
-					adjustmentFactor = 0.85
-				}
-
-				limitedWeight := math.Max(newWeight, oldWeight*adjustmentFactor)
-
-				log.Debugln("[Smart] Connection [%s] - [%s] - [%s] - [%s] detected node quality, degrade weight from %.4f to %.4f (%.1f%%), limited to %.4f",
-					s.Name(), proxyName, weightType, addressDisplay,
-					oldWeight, newWeight, weightChangeRatio*100, limitedWeight)
-
-				if limitedWeight < smart.AllowedWeight {
-					return limitedWeight, true
-				} else {
-					return limitedWeight, false
 				}
 			}
 		}
