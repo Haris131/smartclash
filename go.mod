@@ -6,7 +6,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0
 	github.com/coreos/go-iptables v0.8.0
 	github.com/dlclark/regexp2 v1.11.5
-	github.com/enfein/mieru/v3 v3.24.1
+	github.com/enfein/mieru/v3 v3.26.0
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/render v1.0.3
 	github.com/gobwas/ws v1.4.0
@@ -23,7 +23,7 @@ require (
 	github.com/metacubex/fswatch v0.1.1
 	github.com/metacubex/gopacket v1.1.20-0.20230608035415-7e2f98a3e759
 	github.com/metacubex/kcp-go v0.0.0-20251111012849-7455698490e9
-	github.com/metacubex/quic-go v0.55.1-0.20251024060151-bd465f127128
+	github.com/metacubex/quic-go v0.55.1-0.20251203073212-6940cac967c2
 	github.com/metacubex/randv2 v0.2.0
 	github.com/metacubex/restls-client-go v0.1.7
 	github.com/metacubex/sing v0.5.6
@@ -36,14 +36,14 @@ require (
 	github.com/metacubex/sing-vmess v0.2.4
 	github.com/metacubex/sing-wireguard v0.0.0-20250503063753-2dc62acc626f
 	github.com/metacubex/smux v0.0.0-20251111013112-03f8d12dafc1
-	github.com/metacubex/tfo-go v0.0.0-20251024101424-368b42b59148
+	github.com/metacubex/tfo-go v0.0.0-20251130171125-413e892ac443
 	github.com/metacubex/utls v1.8.3
 	github.com/metacubex/wireguard-go v0.0.0-20250820062549-a6cecdd7f57f
 	github.com/miekg/dns v1.1.63 // lastest version compatible with golang1.20
 	github.com/mroth/weightedrand/v2 v2.1.0
 	github.com/openacid/low v0.1.21
 	github.com/oschwald/maxminddb-golang v1.12.0 // lastest version compatible with golang1.20
-	github.com/saba-futai/sudoku v0.0.1-g
+	github.com/saba-futai/sudoku v0.0.2-b
 	github.com/sagernet/cors v1.2.1
 	github.com/sagernet/netlink v0.0.0-20240612041022-b9a21c07ac6a
 	github.com/samber/lo v1.52.0
@@ -71,7 +71,6 @@ require (
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dmitryikh/leaves v0.0.0-20230708180554-25d19a787328 // indirect
 	github.com/ericlagergren/aegis v0.0.0-20250325060835-cd0defd64358 // indirect
 	github.com/ericlagergren/polyval v0.0.0-20220411101811-e25bc10ba391 // indirect
 	github.com/ericlagergren/siv v0.0.0-20220507050439-0b757b3aa5f1 // indirect
@@ -104,6 +103,7 @@ require (
 	github.com/sina-ghaderi/rabaead v0.0.0-20220730151906-ab6e06b96e8c // indirect
 	github.com/sina-ghaderi/rabbitio v0.0.0-20220730151941-9ce26f4f872e // indirect
 	github.com/u-root/uio v0.0.0-20230220225925-ffce2a382923 // indirect
+	github.com/vernesong/leaves v0.0.0-20251129203830-02de011aefeb // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	gitlab.com/yawning/bsaes.git v0.0.0-20190805113838-0a714cd429ec // indirect

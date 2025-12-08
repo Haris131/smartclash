@@ -11,9 +11,9 @@ type SudokuServer struct {
 	AEADMethod             string `json:"aead-method,omitempty"`
 	PaddingMin             *int   `json:"padding-min,omitempty"`
 	PaddingMax             *int   `json:"padding-max,omitempty"`
-	Seed                   string `json:"seed,omitempty"`
 	TableType              string `json:"table-type,omitempty"`
 	HandshakeTimeoutSecond *int   `json:"handshake-timeout,omitempty"`
+	EnablePureDownlink     *bool  `json:"enable-pure-downlink,omitempty"`
 }
 
 func (s SudokuServer) String() string {

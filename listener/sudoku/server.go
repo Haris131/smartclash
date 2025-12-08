@@ -1,23 +1,24 @@
 package sudoku
 
 import (
+	"errors"
+	"io"
 	"net"
 	"strings"
-
-	"github.com/saba-futai/sudoku/apis"
-	sudokuobfs "github.com/saba-futai/sudoku/pkg/obfs/sudoku"
 
 	"github.com/metacubex/mihomo/adapter/inbound"
 	C "github.com/metacubex/mihomo/constant"
 	LC "github.com/metacubex/mihomo/listener/config"
+	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/transport/socks5"
+	"github.com/metacubex/mihomo/transport/sudoku"
 )
 
 type Listener struct {
 	listener  net.Listener
 	addr      string
 	closed    bool
-	protoConf apis.ProtocolConfig
+	protoConf sudoku.ProtocolConfig
 }
 
 // RawAddress implements C.Listener
@@ -43,19 +44,74 @@ func (l *Listener) Close() error {
 }
 
 func (l *Listener) handleConn(conn net.Conn, tunnel C.Tunnel, additions ...inbound.Addition) {
-	tunnelConn, target, err := apis.ServerHandshake(conn, &l.protoConf)
+	session, err := sudoku.ServerHandshake(conn, &l.protoConf)
 	if err != nil {
 		_ = conn.Close()
 		return
 	}
 
-	targetAddr := socks5.ParseAddr(target)
-	if targetAddr == nil {
-		_ = tunnelConn.Close()
-		return
+	switch session.Type {
+	case sudoku.SessionTypeUoT:
+		l.handleUoTSession(session.Conn, tunnel, additions...)
+	default:
+		targetAddr := socks5.ParseAddr(session.Target)
+		if targetAddr == nil {
+			_ = session.Conn.Close()
+			return
+		}
+		tunnel.HandleTCPConn(inbound.NewSocket(targetAddr, session.Conn, C.SUDOKU, additions...))
 	}
+}
 
-	tunnel.HandleTCPConn(inbound.NewSocket(targetAddr, tunnelConn, C.SUDOKU, additions...))
+func (l *Listener) handleUoTSession(conn net.Conn, tunnel C.Tunnel, additions ...inbound.Addition) {
+	writer := sudoku.NewUoTPacketConn(conn)
+	remoteAddr := conn.RemoteAddr()
+
+	for {
+		addrStr, payload, err := sudoku.ReadDatagram(conn)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				log.Debugln("[Sudoku][UoT] session closed: %v", err)
+			}
+			_ = conn.Close()
+			return
+		}
+
+		target := socks5.ParseAddr(addrStr)
+		if target == nil {
+			log.Debugln("[Sudoku][UoT] drop invalid target: %s", addrStr)
+			continue
+		}
+
+		packet := &uotPacket{
+			payload: payload,
+			writer:  writer,
+			rAddr:   remoteAddr,
+		}
+		tunnel.HandleUDPPacket(inbound.NewPacket(target, packet, C.SUDOKU, additions...))
+	}
+}
+
+type uotPacket struct {
+	payload []byte
+	writer  *sudoku.UoTPacketConn
+	rAddr   net.Addr
+}
+
+func (p *uotPacket) Data() []byte {
+	return p.payload
+}
+
+func (p *uotPacket) WriteBack(b []byte, addr net.Addr) (int, error) {
+	return p.writer.WriteTo(b, addr)
+}
+
+func (p *uotPacket) Drop() {
+	p.payload = nil
+}
+
+func (p *uotPacket) LocalAddr() net.Addr {
+	return p.rAddr
 }
 
 func New(config LC.SudokuServer, tunnel C.Tunnel, additions ...inbound.Addition) (*Listener, error) {
@@ -71,19 +127,12 @@ func New(config LC.SudokuServer, tunnel C.Tunnel, additions ...inbound.Addition)
 		return nil, err
 	}
 
-	seed := config.Seed
-	if seed == "" {
-		seed = config.Key
-	}
-
 	tableType := strings.ToLower(config.TableType)
 	if tableType == "" {
 		tableType = "prefer_ascii"
 	}
 
-	table := sudokuobfs.NewTable(seed, tableType)
-
-	defaultConf := apis.DefaultConfig()
+	defaultConf := sudoku.DefaultConfig()
 	paddingMin := defaultConf.PaddingMin
 	paddingMax := defaultConf.PaddingMax
 	if config.PaddingMin != nil {
@@ -98,18 +147,23 @@ func New(config LC.SudokuServer, tunnel C.Tunnel, additions ...inbound.Addition)
 	if config.PaddingMax == nil && config.PaddingMin != nil && paddingMax < paddingMin {
 		paddingMax = paddingMin
 	}
+	enablePureDownlink := defaultConf.EnablePureDownlink
+	if config.EnablePureDownlink != nil {
+		enablePureDownlink = *config.EnablePureDownlink
+	}
 
 	handshakeTimeout := defaultConf.HandshakeTimeoutSeconds
 	if config.HandshakeTimeoutSecond != nil {
 		handshakeTimeout = *config.HandshakeTimeoutSecond
 	}
 
-	protoConf := apis.ProtocolConfig{
+	protoConf := sudoku.ProtocolConfig{
 		Key:                     config.Key,
 		AEADMethod:              defaultConf.AEADMethod,
-		Table:                   table,
+		Table:                   sudoku.NewTable(config.Key, tableType),
 		PaddingMin:              paddingMin,
 		PaddingMax:              paddingMax,
+		EnablePureDownlink:      enablePureDownlink,
 		HandshakeTimeoutSeconds: handshakeTimeout,
 	}
 	if config.AEADMethod != "" {
