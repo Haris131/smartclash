@@ -1671,7 +1671,6 @@ func (s *Smart) getASNCode(metadata *C.Metadata) string {
 					metadata.DstIPASN = "unknown"
 					return ""
 				}
-                metadata.DstIP = ip
             }
         }
 
