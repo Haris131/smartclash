@@ -744,10 +744,5 @@ func retry[T any](ctx context.Context, ft func(context.Context) (T, error), fe f
 }
 
 func smartRuleType(rt C.RuleType) bool {
-	for _, t := range C.SmartRuleTypes {
-		if rt == t {
-			return true
-		}
-	}
-	return false
+	return C.SmartRuleTypes[rt]
 }

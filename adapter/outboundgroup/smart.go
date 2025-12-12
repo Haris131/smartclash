@@ -10,7 +10,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -484,7 +483,11 @@ func (s *Smart) fillProxies(selected []C.Proxy, weights map[string]float64, all 
 		return selected
 	}
 
-	selectedNames := make(map[string]bool, len(selected))
+	if len(selected) >= minCount {
+		return selected
+	}
+
+	selectedNames := make(map[string]bool, minCount)
 
 	for _, p := range selected {
 		selectedNames[p.Name()] = true
@@ -511,42 +514,16 @@ func (s *Smart) fillProxies(selected []C.Proxy, weights map[string]float64, all 
 		}
 	}
 
-	return selected
-}
-
-func (s *Smart) selectFallbacks(metadata *C.Metadata, proxies []C.Proxy) []C.Proxy {
-	if s.selected != "" {
-		for _, p := range proxies {
-			if p.Name() == s.selected {
-				return []C.Proxy{p}
-			}
-		}
-	}
-
-	fallbacks := make([]C.Proxy, 0, len(proxies))
-	selectedNames := make(map[string]bool, len(proxies))
-
-	indexes := rand.Perm(len(proxies))
-	for _, idx := range indexes {
-		p := proxies[idx]
-		if p.AliveForTestUrl(s.testUrl) && !selectedNames[p.Name()] {
-			fallbacks = append(fallbacks, p)
-			selectedNames[p.Name()] = true
-			if len(fallbacks) >= maxSelected {
+	if len(selected) == 0 {
+		for _, idx := range indexes {
+			selected = append(selected, all[idx])
+			if len(selected) >= minCount {
 				break
 			}
 		}
 	}
 
-	if len(fallbacks) == 0 {
-		if len(proxies) > maxSelected {
-			fallbacks = proxies[:maxSelected]
-		} else {
-			fallbacks = proxies
-		}
-	}
-
-	return fallbacks
+	return selected
 }
 
 // 节点选择
@@ -567,7 +544,6 @@ func (s *Smart) selectProxies(metadata *C.Metadata, proxies []C.Proxy, store boo
 		}
 	}
 
-	result := make([]C.Proxy, 0, maxSelected)
 	proxyByName := make(map[string]C.Proxy)
 	blockedNodes := make(map[string]bool)
 
@@ -604,11 +580,7 @@ func (s *Smart) selectProxies(metadata *C.Metadata, proxies []C.Proxy, store boo
 	trySelector := func(isUDP bool) ([]C.Proxy, map[string]float64) {
 		// 检查匹配缓存
 		if proxiesName := s.store.GetUnwrapResult(s.Name(), s.configName, target, asnNumber, isUDP); len(proxiesName) > 0 {
-			names := make([]string, len(proxiesName))
-			for i, p := range proxiesName {
-				names[i] = p.Name()
-			}
-			if proxies, weights := findProxies(names, nil, isUDP); len(proxies) > 0 {
+			if proxies, weights := findProxies(proxiesName, nil, isUDP); len(proxies) > 0 {
 				return proxies, weights
 			}
 		}
@@ -627,24 +599,16 @@ func (s *Smart) selectProxies(metadata *C.Metadata, proxies []C.Proxy, store boo
 			}
 		}
 
-		return nil, nil
+		return []C.Proxy{}, map[string]float64{}
 	}
 
-	selected, weights := trySelector(metadata.NetWork == C.UDP)
-	if len(selected) > 0 && len(weights) == 0 {
-		result = selected
-	}
+	result, weights := trySelector(metadata.NetWork == C.UDP)
 
-	if len(selected) > 0 && len(selected) < maxSelected && len(weights) > 0 {
-		result = s.fillProxies(selected, weights, proxies, maxSelected, blockedNodes, metadata.NetWork == C.UDP, metadata)
-	}
-
-	if len(result) == 0 {
-		result = s.selectFallbacks(metadata, proxies)
-	}
-
-	if store && !reflect.DeepEqual(selected, result) {
-		s.store.StoreUnwrapResult(s.Name(), s.configName, target, asnNumber, metadata.NetWork == C.UDP, result)
+	if len(result) == 0 || len(weights) > 0 {
+		result = s.fillProxies(result, weights, proxies, maxSelected, blockedNodes, metadata.NetWork == C.UDP, metadata)
+		if store {
+			s.store.StoreUnwrapResult(s.Name(), s.configName, target, asnNumber, metadata.NetWork == C.UDP, result)
+		}
 	}
 
 	return result
@@ -1474,9 +1438,16 @@ func (s *Smart) checkNodeQualityDegradation(
 }
 
 func (s *Smart) findSameConnection(metadata *C.Metadata, target, asnInfo string, isUDP, close bool) {
-	ids := statistic.DefaultManager.GetSmartTargetIDs(target, metadata.DstIPASN)
+	targetIDs, asnIDs := statistic.DefaultManager.GetSmartTargetIDs(target, metadata.DstIPASN)
+	allIDs := make(map[string]bool)
+	for id := range targetIDs {
+		allIDs[id] = true
+	}
+	for id := range asnIDs {
+		allIDs[id] = true
+	}
 	if close {
-		for _, id := range ids {
+		for id := range allIDs {
 			if tracker := statistic.DefaultManager.Get(id); tracker != nil {
 				trackerMetadata := tracker.Info().Metadata
 				if trackerMetadata.UUID != metadata.UUID && lo.Contains(tracker.Chains(), s.Name()) {
@@ -1485,8 +1456,23 @@ func (s *Smart) findSameConnection(metadata *C.Metadata, target, asnInfo string,
 			}
 		}
 	} else {
-		hasOther := len(ids) > 1 || (len(ids) == 1 && ids[0] != metadata.UUID)
-		if !hasOther && (asnInfo == "" || !smart.CdnASNs[asnInfo]) {
+		hasOther := false
+		if len(targetIDs) > 1 {
+			hasOther = true
+		} else if len(targetIDs) == 1 && !targetIDs[metadata.UUID] {
+			hasOther = true
+		} else if len(asnIDs) > 1 {
+			if !smart.CdnASNs[asnInfo] {
+				hasOther = true
+			} else {
+				if len(targetIDs) > 1 || (len(targetIDs) == 1 && !targetIDs[metadata.UUID]) {
+					hasOther = true
+				}
+			}
+		} else if len(asnIDs) == 1 && !asnIDs[metadata.UUID] {
+			hasOther = true
+		}
+		if !hasOther {
 			s.store.DeleteUnwrapResult(s.Name(), s.configName, target, asnInfo, isUDP)
 		}
 	}
@@ -1685,7 +1671,6 @@ func (s *Smart) getASNCode(metadata *C.Metadata) string {
 					metadata.DstIPASN = "unknown"
 					return ""
 				}
-                metadata.DstIP = ip
             }
         }
 

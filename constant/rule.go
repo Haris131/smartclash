@@ -39,23 +39,23 @@ const (
 
 type RuleType int
 
-var SmartRuleTypes = []RuleType{
-	Domain,
-	DomainSuffix,
-	DomainKeyword,
-	DomainRegex,
-	DomainWildcard,
-	GEOSITE,
-	GEOIP,
-	IPASN,
-	IPCIDR,
-	IPSuffix,
-	DstPort,
-	RuleSet,
-	SubRules,
-	AND,
-	OR,
-	NOT,
+var SmartRuleTypes = map[RuleType]bool{
+	Domain:          true,
+	DomainSuffix:    true,
+	DomainKeyword:   true,
+	DomainRegex:     true,
+	DomainWildcard:  true,
+	GEOSITE:         true,
+	GEOIP:           true,
+	IPASN:           true,
+	IPCIDR:          true,
+	IPSuffix:        true,
+	DstPort:         true,
+	RuleSet:         true,
+	SubRules:        true,
+	AND:             true,
+	OR:              true,
+	NOT:             true,
 }
 
 func (rt RuleType) String() string {

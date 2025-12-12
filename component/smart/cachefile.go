@@ -196,19 +196,19 @@ func (s *Store) BatchSaveStats(operations []StoreOperation) error {
 // 刷新队列中的操作到数据库
 func (s *Store) FlushQueue(force bool) {
 	threshold := GetBatchSaveThreshold()
-	if !force {
-		if len(getGlobalQueueSnapshot()) < threshold {
-			return
-		}
-	}
-
-	emptyQueue := make([]StoreOperation, 0, threshold)
-	ops := swapGlobalQueue(emptyQueue)
+	ops := getGlobalQueueSnapshot()
 
 	if len(ops) == 0 {
 		return
 	}
 
+	if !force {
+		if len(ops) < threshold {
+			return
+		}
+	}
+
+	InitQueue()
 	s.BatchSave(ops)
 	log.Debugln("[SmartStore] Queue datas saved, operations: [%d]", len(ops))
 }
