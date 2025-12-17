@@ -3,13 +3,9 @@ package route
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/render"
 
 	"github.com/metacubex/mihomo/adapter/outboundgroup"
 	"github.com/metacubex/mihomo/common/utils"
@@ -17,6 +13,10 @@ import (
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel"
+
+	"github.com/metacubex/chi"
+	"github.com/metacubex/chi/render"
+	"github.com/metacubex/http"
 )
 
 func groupRouter() http.Handler {
