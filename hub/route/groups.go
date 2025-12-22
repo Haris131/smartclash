@@ -2,7 +2,6 @@ package route
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -106,7 +105,7 @@ func getGroupWeights(w http.ResponseWriter, r *http.Request) {
 		render.Status(r, http.StatusBadRequest)
 		render.JSON(w, r, render.M{
 			"weights": []interface{}{},
-			"error":   fmt.Sprintf("Not a Smart group (actual type: %T)", proxy.Adapter()),
+			"error":   "Not a Smart group",
 		})
 		return
 	}
