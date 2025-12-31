@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/metacubex/bbolt"
 	"github.com/metacubex/mihomo/common/atomic"
@@ -24,6 +23,7 @@ const (
 	OpSaveStats
 	OpSavePrefetch
 	OpSaveRanking
+	OpSaveTargetFailures
 )
 
 const (
@@ -31,6 +31,7 @@ const (
 	KeyTypeNode             = "node"
 	KeyTypeStats            = "stats"
 	KeyTypeRanking          = "ranking"
+	KeyTypeTargetFailures   = "failures"
 
 	WeightTypeTCP           = "tcp"
 	WeightTypeUDP           = "udp"
@@ -40,12 +41,10 @@ const (
 
 const (
 	DefaultMinSampleCount   = 2
-	RetentionPeriod         = 7 * 24 * time.Hour
 	CacheMaxAge             = 21600
-	PrefetchCacheMaxAge     = 72 * 3600
 
-	MaxTargetsLimit         = 1000
-	MinTargetsLimit         = 100
+	MaxTargetsLimit         = 2000
+	MinTargetsLimit         = 200
 	MaxBatchThreshLimit     = 300
 	MinBatchThreshLimit     = 50
 
@@ -132,7 +131,7 @@ type (
 		MaxDownloadRate    float64            `json:"max_download_rate"`
 		ConnectionDuration float64            `json:"connection_duration"`
 		Degraded           bool               `json:"degraded"`
-		Status             int64              `json:"status"`
+		Status             map[string]bool    `json:"status"`
 	}
 
 	NodeState struct {
@@ -167,6 +166,11 @@ type (
 		UDP    []string  `json:"udp,omitempty"`
 		RefTCP string    `json:"ref_tcp,omitempty"`
 		RefUDP string    `json:"ref_udp,omitempty"`
+	}
+
+	TargetFailureStats struct {
+		FailureCount int64  `json:"failure_count"`
+		LastFailure  int64  `json:"last_failure"`
 	}
 )
 
@@ -493,11 +497,13 @@ func (s *Store) FlushByLevel(level string, config string, group string) error {
 		s.DeleteByPath(FormatDBKey(KeyTypeNode, config), false)
 		s.DeleteByPath(FormatDBKey(KeyTypeRanking, config), false)
 		s.DeleteByPath(FormatDBKey(KeyTypePrefetch, config), false)
+		s.DeleteByPath(FormatDBKey(KeyTypeTargetFailures, config), false)
 	} else if level == "group" {
 		s.DeleteByPath(FormatDBKey(KeyTypeStats, config, group), false)
 		s.DeleteByPath(FormatDBKey(KeyTypeNode, config, group), false)
 		s.DeleteByPath(FormatDBKey(KeyTypeRanking, config, group), false)
 		s.DeleteByPath(FormatDBKey(KeyTypePrefetch, config, group), false)
+		s.DeleteByPath(FormatDBKey(KeyTypeTargetFailures, config, group), false)
 	}
 
 	return nil

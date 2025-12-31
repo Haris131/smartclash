@@ -51,7 +51,9 @@ func (s *Store) BatchSave(operations []StoreOperation) error {
 					key = FormatDBKey(KeyTypePrefetch, op.Config, op.Group, op.Target)
 				case OpSaveRanking:
 					key = FormatDBKey(KeyTypeRanking, op.Config, op.Group)
-				}
+				case OpSaveTargetFailures:
+                    key = FormatDBKey(KeyTypeTargetFailures, op.Config, op.Group, op.Target)
+                }
 
 				if key != "" && op.Data != nil {
 					writeMapSync.Store(key, op.Data)
@@ -235,7 +237,7 @@ func (s *Store) GetSubBytesByPath(prefix string) (map[string][]byte, error) {
 
 	strict := false
 	switch keyType {
-	case KeyTypeNode, KeyTypePrefetch:
+	case KeyTypeNode, KeyTypePrefetch, KeyTypeTargetFailures:
 		if len(pathParts) == 5 {
 			strict = true
 		}
@@ -282,6 +284,14 @@ func (s *Store) GetSubBytesByPath(prefix string) (map[string][]byte, error) {
 		case KeyTypeRanking:
 			if op.Type == OpSaveRanking {
 				key = FormatDBKey(KeyTypeRanking, op.Config, op.Group)
+				result[key] = op.Data
+			}
+		case KeyTypeTargetFailures:
+			if op.Type == OpSaveTargetFailures && op.Target != "" {
+				if len(pathParts) >= 5 && pathParts[4] != op.Target {
+					continue
+				}
+				key = FormatDBKey(KeyTypeTargetFailures, op.Config, op.Group, op.Target)
 				result[key] = op.Data
 			}
 		}
@@ -337,8 +347,8 @@ func (s *Store) DeleteByPath(path string, strict bool) error {
 }
 
 // 删除域名记录
-func (s *Store) DeleteTargetRecords(group, config, target string) {
-	key := FormatDBKey(KeyTypeStats, config, group, target)
+func (s *Store) DeleteTargetRecords(keyType, group, config, target string) {
+	key := FormatDBKey(keyType, config, group, target)
 	if err := s.DeleteByPath(key, false); err != nil {
 		return
 	}

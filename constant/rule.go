@@ -46,7 +46,6 @@ var SmartRuleTypes = map[RuleType]bool{
 	DomainRegex:     true,
 	DomainWildcard:  true,
 	GEOSITE:         true,
-	GEOIP:           true,
 	IPASN:           true,
 	IPCIDR:          true,
 	IPSuffix:        true,

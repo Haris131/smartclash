@@ -29,7 +29,6 @@ type AtomicStatsRecord struct {
 	connectTime     atomic.Int64
 	latency         atomic.Int64
 	lastUsed        atomic.Int64
-	status          atomic.Int64
 
 	uploadTotal     atomic.Float64
 	downloadTotal   atomic.Float64
@@ -37,7 +36,8 @@ type AtomicStatsRecord struct {
 	maxUploadRate   atomic.Float64
 	maxDownloadRate atomic.Float64
 
-	weights *lru.LruCache[string, float64]
+	status          *lru.LruCache[string, bool]
+	weights         *lru.LruCache[string, float64]
 }
 
 type ActiveTarget struct {
@@ -88,7 +88,8 @@ func (s *Store) GetOrCreateAtomicRecord(cacheKey string, group, config, target, 
 		duration:        atomic.NewFloat64(0),
 		maxUploadRate:   atomic.NewFloat64(0),
 		maxDownloadRate: atomic.NewFloat64(0),
-		weights:         lru.New[string, float64](lru.WithSize[string, float64](50)),
+		weights:         lru.New[string, float64](lru.WithSize[string, float64](100)),
+		status:          lru.New[string, bool](lru.WithSize[string, bool](100)),
 	}
 	record.lastUsed.Store(time.Now().Unix())
 
@@ -101,17 +102,21 @@ func (s *Store) GetOrCreateAtomicRecord(cacheKey string, group, config, target, 
 				record.connectTime.Store(existingRecord.ConnectTime)
 				record.latency.Store(existingRecord.Latency)
 				record.lastUsed.Store(existingRecord.LastUsed)
-				if existingRecord.Weights != nil {
-					for k, v := range existingRecord.Weights {
-						record.weights.Set(k, v)
-					}
-				}
 				record.uploadTotal.Store(existingRecord.UploadTotal)
 				record.downloadTotal.Store(existingRecord.DownloadTotal)
 				record.duration.Store(existingRecord.ConnectionDuration)
 				record.maxUploadRate.Store(existingRecord.MaxUploadRate)
 				record.maxDownloadRate.Store(existingRecord.MaxDownloadRate)
-				record.status.Store(existingRecord.Status)
+				if existingRecord.Weights != nil {
+					for k, v := range existingRecord.Weights {
+						record.weights.Set(k, v)
+					}
+				}
+				if existingRecord.Status != nil {
+                    for k, v := range existingRecord.Status {
+                        record.status.Set(k, v)
+                    }
+                }
 			}
 		}
 	}
@@ -126,21 +131,19 @@ func (record *AtomicStatsRecord) CreateStatsSnapshot() *StatsRecord {
 		return &StatsRecord{Weights: make(map[string]float64)}
 	}
 
-	weights := record.weights.FilterByKeyPrefix("")
-
 	return &StatsRecord{
 		Success:            record.success.Load(),
 		Failure:            record.failure.Load(),
 		ConnectTime:        record.connectTime.Load(),
 		Latency:            record.latency.Load(),
 		LastUsed:           record.lastUsed.Load(),
-		Weights:            weights,
 		UploadTotal:        record.uploadTotal.Load(),
 		DownloadTotal:      record.downloadTotal.Load(),
 		MaxUploadRate:      record.maxUploadRate.Load(),
 		MaxDownloadRate:    record.maxDownloadRate.Load(),
 		ConnectionDuration: record.duration.Load(),
-		Status:             record.status.Load(),
+		Weights:            record.weights.FilterByKeyPrefix(""),
+		Status:             record.status.FilterByKeyPrefix(""),
 	}
 }
 
@@ -169,7 +172,7 @@ func (r *AtomicStatsRecord) Get(field string) interface{} {
 	case "duration":
 		return r.duration.Load()
 	case "status":
-		return r.status.Load()
+		return r.status.FilterByKeyPrefix("")
 	default:
 		return nil
 	}
@@ -198,8 +201,10 @@ func (r *AtomicStatsRecord) Set(field string, value interface{}) {
 			r.lastUsed.Store(v)
 		}
 	case "status":
-		if v, ok := value.(int64); ok {
-			r.status.Store(v)
+		if v, ok := value.(map[string]bool); ok {
+			for k, val := range v {
+				r.status.Set(k, val)
+			}
 		}
 	case "uploadTotal":
 		if v, ok := value.(float64); ok {
@@ -467,8 +472,8 @@ func (s *Store) GetBestProxyForTarget(group, config, target, asnNumber string, i
 
 	nodesWithWeight := make(map[string]float64)
 
-	// 优先使用 ASN，取 75% 分位数权重排序并使用target结果进行修正
-	if asnNumber != "" {
+	// 优先使用 ASN
+	if asnNumber != "" && !CdnASNs[asnNumber] {
 		asnWeightType := WeightTypeTCPASN + ":" + asnNumber
 		if isUDP {
 			asnWeightType = WeightTypeUDPASN + ":" + asnNumber
@@ -476,102 +481,55 @@ func (s *Store) GetBestProxyForTarget(group, config, target, asnNumber string, i
 
 		nodeWeights := make(map[string][]float64)
 
-		for mapTarget, mapStats := range allStatsMap {
+		for _, mapStats := range allStatsMap {
 			for nodeName, data := range mapStats {
 				var record StatsRecord
 				if json.Unmarshal(data, &record) != nil {
 					continue
 				}
 				if record.Weights != nil {
-					if mapTarget == target {
-						for k, weight := range record.Weights {
-							if !isUDP && strings.HasPrefix(k, WeightTypeTCPASN) && weight > 0 {
-								timeDecay := getTimeDecay(record.LastUsed)
-								decayedWeight := weight * timeDecay
-								nodeWeights[nodeName] = append(nodeWeights[nodeName], decayedWeight)
-							}
-							if isUDP && strings.HasPrefix(k, WeightTypeUDPASN) && weight > 0 {
-								timeDecay := getTimeDecay(record.LastUsed)
-								decayedWeight := weight * timeDecay
-								nodeWeights[nodeName] = append(nodeWeights[nodeName], decayedWeight)
-							}
-						}
-					} else {
-						if weight, ok := record.Weights[asnWeightType]; ok && weight > 0 {
-							timeDecay := getTimeDecay(record.LastUsed)
-							decayedWeight := weight * timeDecay
-							nodeWeights[nodeName] = append(nodeWeights[nodeName], decayedWeight)
-						}
+					if weight, ok := record.Weights[asnWeightType]; ok && weight > 0 {
+						timeDecay := getTimeDecay(record.LastUsed)
+						decayedWeight := weight * timeDecay
+						nodeWeights[nodeName] = append(nodeWeights[nodeName], decayedWeight)
 					}
 				}
 			}
 		}
 
-		// 75%分位数
-		calculatePercentile75 := func(weights []float64) float64 {
-			if len(weights) == 0 {
-				return 0.0
-			}
-			sorted := make([]float64, len(weights))
-			copy(sorted, weights)
-			sort.Float64s(sorted)
-			n := len(sorted)
-			index := int(float64(n-1) * 0.75)
-			return sorted[index]
-		}
-
+		// 最高或者最低权重
 		for nodeName, weights := range nodeWeights {
-			if len(weights) >= DefaultMinSampleCount {
-				hasLowWeight := false
-				minWeight := math.MaxFloat64
-				for _, w := range weights {
-					if w < AllowedWeight {
-						hasLowWeight = true
-					}
-					if w < minWeight {
-						minWeight = w
-					}
-				}
-				var finalWeight float64
-				if hasLowWeight {
-					finalWeight = minWeight
-				} else {
-					finalWeight = calculatePercentile75(weights)
-				}
-				nodesWithWeight[nodeName] = finalWeight
+			sort.Float64s(weights)
+			if weights[0] < AllowedWeight {
+				nodesWithWeight[nodeName] = weights[0]
+			} else {
+				nodesWithWeight[nodeName] = weights[len(weights)-1]
 			}
 		}
-	}
-
-	var mapStats map[string][]byte
-	if stats, ok := allStatsMap[target]; ok {
-		mapStats = stats
 	} else {
-		if stats, err := s.GetStatsForTarget(group, config, target, ""); err == nil {
+		var mapStats map[string][]byte
+		if stats, ok := allStatsMap[target]; ok {
 			mapStats = stats
+		} else {
+			if stats, err := s.GetStatsForTarget(group, config, target, ""); err == nil {
+				mapStats = stats
+			}
 		}
-	}
 
-	for nodeName, data := range mapStats {
-		var record StatsRecord
-		if json.Unmarshal(data, &record) != nil {
-			continue
-		}
-		var weight float64
-		if record.Weights != nil {
-			weight = record.Weights[weightType]
-		}
-		if weight > 0 {
-			timeDecay := getTimeDecay(record.LastUsed)
-			decayedWeight := weight * timeDecay
-			if _, exists := nodesWithWeight[nodeName]; !exists {
-				if asnNumber == "" || CdnASNs[asnNumber] {
-					nodesWithWeight[nodeName] = decayedWeight
-				}
-			} else {
-				if decayedWeight < AllowedWeight && nodesWithWeight[nodeName] > AllowedWeight {
-					nodesWithWeight[nodeName] = decayedWeight
-				}
+		for nodeName, data := range mapStats {
+			var record StatsRecord
+			if json.Unmarshal(data, &record) != nil {
+				continue
+			}
+			var weight float64
+			if record.Weights != nil {
+				weight = record.Weights[weightType]
+			}
+			if weight > 0 {
+				timeDecay := getTimeDecay(record.LastUsed)
+				// already minest than ASN weight
+				decayedWeight := weight * timeDecay
+				nodesWithWeight[nodeName] = decayedWeight
 			}
 		}
 	}
@@ -879,13 +837,11 @@ func (s *Store) RunPrefetch(group, config string, proxyMap map[string]string) in
 					finalNodeMap[node] = oldWeights[i]
 				}
 
-				needUpdate = false
-
 				for i, newNode := range item.bestNodes {
 					newW := item.bestWeights[i]
 					if oldW, exists := finalNodeMap[newNode]; exists {
 						// prevent degrade recovery too fast
-						if math.Abs(newW - oldW) / oldW > 0.1 && (oldW > AllowedWeight || newW < AllowedWeight) {
+						if math.Abs(newW - oldW) / oldW > 0.1 {
 							finalNodeMap[newNode] = newW
 							needUpdate = true
 						}
@@ -936,7 +892,7 @@ func (s *Store) RunPrefetch(group, config string, proxyMap map[string]string) in
 		}
 
 		if needUpdate {
-			s.StorePrefetchResult(group, config, item.target, item.asnNumber, item.isUDP, sortedNodes, sortedWeights, len(oldNodes))
+			s.StorePrefetchResult(group, config, item.target, item.asnNumber, item.isUDP, sortedNodes, sortedWeights)
 		}
 
 		nodeWeightPairs := make([]string, len(sortedNodes))
@@ -1129,6 +1085,41 @@ func (s *Store) GetAllNodesForGroup(group, config string) ([]string, error) {
 	return result, nil
 }
 
+// 目标失败次数统计
+func (s *Store) GetTargetFailureStats(group, config, target string) (map[string][]byte, error) {
+	pathPrefix := FormatDBKey(KeyTypeTargetFailures, config, group, target)
+	rawResult, err := s.GetSubBytesByPath(pathPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	return rawResult, nil
+}
+
+func (s *Store) UpdateTargetFailureStats(group, config, target string, failureCount int64, stats TargetFailureStats) {
+	if failureCount <= 0 && stats.FailureCount <= 0{
+		return
+	}
+
+	stats.FailureCount += failureCount
+	stats.LastFailure = time.Now().Unix()
+	
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return
+	}
+
+	appendToGlobalQueue(StoreOperation{
+		Type:   OpSaveTargetFailures,
+		Group:  group,
+		Config: config,
+		Target: target,
+		Data:   data,
+	})
+
+	go s.FlushQueue(false)
+}
+
 // 移除节点数据
 func (s *Store) RemoveNodesData(group, config string, nodes []string) error {
 	if len(nodes) == 0 {
@@ -1289,98 +1280,97 @@ func (s *Store) RemoveNodesData(group, config string, nodes []string) error {
 	return firstErr
 }
 
-// 清理旧的域名记录
-func (s *Store) CleanupOldTargets(group, config string) error {
-	statsPrefix := FormatDBKey(KeyTypeStats, config, group)
+// 清理旧的记录
+func (s *Store) CleanupOldRecords(group, config string) error {
+	keyTypes := []string{KeyTypeStats, KeyTypePrefetch, KeyTypeTargetFailures}
 
 	globalCacheParams.mutex.RLock()
-	maxTargets := globalCacheParams.MaxTargets * 2
+	maxTargets := globalCacheParams.MaxTargets
 	globalCacheParams.mutex.RUnlock()
 
-	statsData, err := s.DBViewPrefixScan(statsPrefix, -1, false)
-	if err != nil {
-		return err
-	}
+	for _, keyType := range keyTypes {
+		pathPrefix := FormatDBKey(keyType, config, group)
 
-	targetLastUsed := make(map[string]time.Time)
-	for path, data := range statsData {
-		parts := strings.Split(path, "/")
-		if len(parts) < 6 {
+		rawData, err := s.DBViewPrefixScan(pathPrefix, -1, false)
+		if err != nil {
 			continue
 		}
-		target := parts[len(parts)-2]
-		var statsRecord StatsRecord
-		if err := json.Unmarshal(data, &statsRecord); err != nil {
+
+		type targetInfo struct {
+			keyType string
+			target  string
+			time    time.Time
+		}
+		var invalidTargets []targetInfo
+		var validTargets []targetInfo
+
+		for path, data := range rawData {
+			parts := strings.Split(path, "/")
+			if len(parts) < 4 {
+				continue
+			}
+			target := parts[len(parts)-1]
+
+			var lastTime int64
+			switch keyType {
+			case KeyTypeStats:
+				var record StatsRecord
+				if err := json.Unmarshal(data, &record); err != nil {
+					continue
+				}
+				lastTime = record.LastUsed
+			case KeyTypePrefetch:
+				var pm PrefetchMap
+				if err := json.Unmarshal(data, &pm); err != nil {
+					continue
+				}
+				lastTime = pm.UpdatedTime
+			case KeyTypeTargetFailures:
+				var stats TargetFailureStats
+				if err := json.Unmarshal(data, &stats); err != nil {
+					continue
+				}
+				lastTime = stats.LastFailure
+			default:
+				continue
+			}
+
+			info := targetInfo{keyType: keyType, target: target, time: time.Unix(lastTime, 0)}
+			if lastTime <= 0 {
+				invalidTargets = append(invalidTargets, info)
+			} else {
+				validTargets = append(validTargets, info)
+			}
+		}
+
+		totalRecords := len(invalidTargets) + len(validTargets)
+		if totalRecords <= maxTargets {
 			continue
 		}
-		lastUsedTime := time.Unix(statsRecord.LastUsed, 0)
-		if last, ok := targetLastUsed[target]; !ok || lastUsedTime.After(last) {
-			targetLastUsed[target] = lastUsedTime
+
+		toDeleteCount := totalRecords - maxTargets
+		deleted := 0
+		for _, info := range invalidTargets {
+			if deleted >= toDeleteCount {
+				break
+			}
+			s.DeleteTargetRecords(info.keyType, group, config, info.target)
+			deleted++
 		}
-	}
 
-	type targetInfo struct {
-		target   string
-		lastUsed time.Time
-	}
-	var targetList []targetInfo
-	for target, lastUsed := range targetLastUsed {
-		targetList = append(targetList, targetInfo{target, lastUsed})
-	}
-	sort.Slice(targetList, func(i, j int) bool {
-		return targetList[i].lastUsed.Before(targetList[j].lastUsed)
-	})
-
-	if len(targetList) <= maxTargets {
-		return nil
-	}
-	toDelete := targetList[:len(targetList)-maxTargets]
-	for _, info := range toDelete {
-		s.DeleteTargetRecords(group, config, info.target)
-	}
-
-	log.Debugln("[SmartStore] Cleaned up [%d] old target records, keeping the latest [%d] (group %s)",
-		len(toDelete), maxTargets, group)
-	return nil
-}
-
-// 清理过期统计数据
-func (s *Store) CleanupExpiredStats(group, config string) error {
-	statsPrefix := FormatDBKey(KeyTypeStats, config, group)
-	statsData, err := s.DBViewPrefixScan(statsPrefix, -1, false)
-	if err != nil {
-		return err
-	}
-
-	threshold := time.Now().Add(-RetentionPeriod)
-	var expiredTargets []string
-	targetLastUsed := make(map[string]time.Time)
-
-	for path, data := range statsData {
-		parts := strings.Split(path, "/")
-		if len(parts) < 6 {
-			continue
+		if deleted < toDeleteCount {
+			remaining := toDeleteCount - deleted
+			sort.Slice(validTargets, func(i, j int) bool {
+				return validTargets[i].time.Before(validTargets[j].time)
+			})
+			for i := 0; i < remaining && i < len(validTargets); i++ {
+				s.DeleteTargetRecords(validTargets[i].keyType, group, config, validTargets[i].target)
+				deleted++
+			}
 		}
-		target := parts[len(parts)-2]
-		var statsRecord StatsRecord
-		if err := json.Unmarshal(data, &statsRecord); err != nil {
-			continue
-		}
-		lastUsedTime := time.Unix(statsRecord.LastUsed, 0)
-		if last, ok := targetLastUsed[target]; !ok || lastUsedTime.After(last) {
-			targetLastUsed[target] = lastUsedTime
-		}
-	}
 
-	for target, lastUsed := range targetLastUsed {
-		if lastUsed.Before(threshold) {
-			expiredTargets = append(expiredTargets, target)
-			s.DeleteTargetRecords(group, config, target)
-		}
-	}
-
-	if len(expiredTargets) > 0 {
-		log.Debugln("[SmartStore] Deleted [%d] expired targets for group [%s]", len(expiredTargets), group)
+		log.Debugln("[SmartStore] Cleaned up [%d] old %s records, keeping the latest [%d] (group %s)",
+			deleted, keyType, maxTargets, group)
 	}
 
 	return nil

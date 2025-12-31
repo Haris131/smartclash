@@ -1056,7 +1056,7 @@ func boolToFloat(b bool) float64 {
 	return 0.0
 }
 
-func CreateModelInputFromStatsRecord(record *smart.StatsRecord, metadata *C.Metadata, uploadTotal, downloadTotal, maxUploadRate, maxDownloadRate float64) *ModelInput {
+func CreateModelInputFromStatsRecord(record *smart.StatsRecord, metadata *C.Metadata, uploadTotal, downloadTotal, maxUploadRate, maxDownloadRate float64, wildcardTarget string) *ModelInput {
     input := &ModelInput{
         Success:                int64(record.Success),
         Failure:                int64(record.Failure),
@@ -1082,7 +1082,7 @@ func CreateModelInputFromStatsRecord(record *smart.StatsRecord, metadata *C.Meta
         input.DestIPASN = metadata.DstIPASN
     }
 
-    input.Host = smart.GetEffectiveTarget(metadata.Host, metadata.DstIP.String())
+    input.Host = wildcardTarget
     if metadata.DstIP.IsValid() {
         input.DestIP = metadata.DstIP.String()
     }

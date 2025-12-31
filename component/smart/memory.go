@@ -43,7 +43,7 @@ func InitCache() {
 }
 
 // 存储预取结果
-func (s *Store) StorePrefetchResult(group, config string, target string, asnNumber string, isUDP bool, proxyNames []string, weights []float64, oldNodesCount int) {
+func (s *Store) StorePrefetchResult(group, config string, target string, asnNumber string, isUDP bool, proxyNames []string, weights []float64) {
 	if target == "" || len(proxyNames) == 0 {
 		return
 	}
@@ -58,9 +58,7 @@ func (s *Store) StorePrefetchResult(group, config string, target string, asnNumb
 	} else {
 		pm.TCP = nodeWeight
 	}
-	if oldNodesCount == 0 {
-		pm.UpdatedTime = time.Now().Unix()
-	}
+	pm.UpdatedTime = time.Now().Unix()
 	data, err := json.Marshal(pm)
 	if err != nil {
 		return
@@ -81,9 +79,7 @@ func (s *Store) StorePrefetchResult(group, config string, target string, asnNumb
 		} else {
 			asnPm.RefTCP = targetCacheKey
 		}
-		if oldNodesCount == 0 {
-			asnPm.UpdatedTime = time.Now().Unix()
-		}
+		asnPm.UpdatedTime = time.Now().Unix()
 		asnData, asnErr := json.Marshal(asnPm)
 		if asnErr != nil {
 			return
@@ -108,9 +104,6 @@ func (s *Store) GetPrefetchResult(group, config string, target string, asnNumber
 	}
 
 	findResult := func(pm PrefetchMap) ([]string, []float64) {
-		if pm.UpdatedTime > 0 && time.Now().Unix() - pm.UpdatedTime > PrefetchCacheMaxAge {
-			return nil, nil
-		}
 		var res NodesWithWeights
 		if isUDP {
 			res = pm.UDP

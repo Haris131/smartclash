@@ -318,7 +318,7 @@ func (p *Proxy) StatusTest(ctx context.Context, url string, expectedStatus utils
 
 	tlsConfig, err := ca.GetTLSConfig(ca.Option{})
 	if err != nil {
-		return
+		return 1, false, err
 	}
 
 	transport := &http.Transport{
@@ -357,6 +357,8 @@ func (p *Proxy) StatusTest(ctx context.Context, url string, expectedStatus utils
 	if err != nil {
 		if netErr, okTimeout := err.(net.Error); okTimeout && netErr.Timeout() {
 			headStatusCode = 599
+		} else if err == context.Canceled || err == context.DeadlineExceeded {
+			headStatusCode = 599
 		} else {
 			return 1, false, err
 		}
@@ -388,6 +390,8 @@ func (p *Proxy) StatusTest(ctx context.Context, url string, expectedStatus utils
 		if getErr != nil || getResp == nil {
 			if netErr, okTimeout := getErr.(net.Error); okTimeout && netErr.Timeout() {
 				getStatusCode = 599
+			} else if getErr == context.Canceled || getErr == context.DeadlineExceeded {
+				getStatusCode = 599
 			} else {
 				return uint16(headStatusCode), false, nil
 			}
@@ -398,7 +402,7 @@ func (p *Proxy) StatusTest(ctx context.Context, url string, expectedStatus utils
 
 		if headStatusCode == getStatusCode {
 			status = uint16(headStatusCode)
-			ok = expectedStatus == nil || expectedStatus.Check(status)
+			ok = expectedStatus.Check(status)
 			if banHeadStatus[int(status)] {
 				ok = false
 			}
@@ -411,7 +415,7 @@ func (p *Proxy) StatusTest(ctx context.Context, url string, expectedStatus utils
 	if resp != nil {
 		defer resp.Body.Close()
 		status = uint16(resp.StatusCode)
-		ok = expectedStatus == nil || expectedStatus.Check(status)
+		ok = expectedStatus.Check(status)
 		return status, ok, nil
 	}
 
