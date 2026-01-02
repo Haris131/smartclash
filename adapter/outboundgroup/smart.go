@@ -48,7 +48,7 @@ const (
 	maxRetries               = 4
 	maxSelected              = 10
 
-	targetFailureLimit       = 10
+	targetFailureLimit       = 5
 
 	parallelDials            = 3
 	connectThreshold         = 3.0
@@ -1446,7 +1446,7 @@ func (s *Smart) checkNodeQualityDegradation(
 	}
 
 	// 零流量连接
-	if connectionDuration > 100 && downloadTotal == 0 && uploadTotal == 0 && !isUDP {
+	if connectionDuration > 100 && downloadTotal == 0 && uploadTotal == 0 && metadata.DstPort == 443 && !isUDP {
 		s.store.UpdateTargetFailureStats(s.Name(), s.configName, host, 1, stats)
 		if blockEnabled {
 			return newWeight, false
@@ -1517,8 +1517,7 @@ func (s *Smart) findSameConnection(metadata *C.Metadata, target, asnInfo string,
 	if close {
 		for id := range allIDs {
 			if tracker := statistic.DefaultManager.Get(id); tracker != nil {
-				trackerMetadata := tracker.Info().Metadata
-				if trackerMetadata.UUID != metadata.UUID && lo.Contains(tracker.Chains(), s.Name()) {
+				if id != metadata.UUID && lo.Contains(tracker.Chains(), s.Name()) {
 					_ = tracker.Close()
 				}
 			}
