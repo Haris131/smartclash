@@ -91,7 +91,6 @@ func (s *Store) GetOrCreateAtomicRecord(cacheKey string, group, config, target, 
 		weights:         lru.New[string, float64](lru.WithSize[string, float64](100)),
 		status:          lru.New[string, bool](lru.WithSize[string, bool](100)),
 	}
-	record.lastUsed.Store(time.Now().Unix())
 
 	if existingData, err := s.GetStatsForTarget(group, config, target, proxy); err == nil {
 		if data, exists := existingData[proxy]; exists {
@@ -872,13 +871,6 @@ func (s *Store) RunPrefetch(group, config string, proxyMap map[string]string) in
 				} else {
 					sortedNodes = item.bestNodes
 					sortedWeights = item.bestWeights
-				}
-			}
-
-			if len(sortedNodes) > 10 {
-				if sortedWeights[9] > AllowedWeight {
-					sortedNodes = sortedNodes[:10]
-					sortedWeights = sortedWeights[:10]
 				}
 			}
 

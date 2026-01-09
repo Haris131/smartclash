@@ -57,6 +57,12 @@ type ProtocolConfig struct {
 
 	// HTTPMaskHost optionally overrides the HTTP Host header / SNI host for HTTP tunnel modes (client-side).
 	HTTPMaskHost string
+
+	// HTTPMaskMultiplex controls multiplex behavior when HTTPMask tunnel modes are enabled:
+	//   - "off": disable reuse; each Dial establishes its own HTTPMask tunnel
+	//   - "auto": reuse underlying HTTP connections across multiple tunnel dials (HTTP/1.1 keep-alive / HTTP/2)
+	//   - "on": enable "single tunnel, multi-target" mux (Sudoku-level multiplex; Dial behaves like "auto" otherwise)
+	HTTPMaskMultiplex string
 }
 
 func (c *ProtocolConfig) Validate() error {
@@ -103,6 +109,12 @@ func (c *ProtocolConfig) Validate() error {
 		return fmt.Errorf("invalid http-mask-mode: %s, must be one of: legacy, stream, poll, auto", c.HTTPMaskMode)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(c.HTTPMaskMultiplex)) {
+	case "", "off", "auto", "on":
+	default:
+		return fmt.Errorf("invalid http-mask-multiplex: %s, must be one of: off, auto, on", c.HTTPMaskMultiplex)
+	}
+
 	return nil
 }
 
@@ -127,6 +139,7 @@ func DefaultConfig() *ProtocolConfig {
 		EnablePureDownlink:      true,
 		HandshakeTimeoutSeconds: 5,
 		HTTPMaskMode:            "legacy",
+		HTTPMaskMultiplex:       "off",
 	}
 }
 

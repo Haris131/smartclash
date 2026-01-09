@@ -482,12 +482,13 @@ func (s *Smart) MarshalJSON() ([]byte, error) {
 }
 
 func (s *Smart) fillProxies(selected []C.Proxy, weights map[string]float64, all []C.Proxy, minCount int, blockedNodes map[string]bool, isUDP bool, metadata *C.Metadata) []C.Proxy {
-	if len(all) == len(selected) {
+	if len(all) <= len(selected) {
 		return selected
 	}
 
-	if len(selected) >= minCount {
-		return selected
+	ratio := float64(len(selected)) / float64(len(all))
+	if len(selected) >= minCount && rand.Float64() < ratio {
+		return selected[:minCount]
 	}
 
 	selectedNames := make(map[string]bool, minCount)
@@ -531,6 +532,7 @@ func (s *Smart) fillProxies(selected []C.Proxy, weights map[string]float64, all 
 				}
 				selectedNames[p.Name()] = true
 				if len(selected) >= minCount {
+					selected = selected[:minCount]
 					break
 				}
 			}
@@ -857,9 +859,7 @@ func (s *Smart) updateConnectionDuration(record *smart.AtomicStatsRecord, connec
 }
 
 // 记录保存
-func (s *Smart) saveStatsRecord( target string, proxy C.Proxy, record *smart.StatsRecord, lastUsed int64) {
-	record.LastUsed = lastUsed
-
+func (s *Smart) saveStatsRecord(target string, proxy C.Proxy, record *smart.StatsRecord) {
 	go func() {
 		if data, err := json.Marshal(record); err == nil {
 			operation := smart.StoreOperation{
@@ -1105,31 +1105,24 @@ func (s *Smart) logConnectionStats(status string, record *smart.StatsRecord, met
 }
 
 // 数据收集
-func (s *Smart) collectConnectionData(record *smart.StatsRecord, metadata *C.Metadata,
-	uploadTotal, downloadTotal, maxUploadRate, maxDownloadRate, baseWeight float64, proxyName, wildcardTarget string, ModelPredicted bool) {
+func (s *Smart) collectConnectionData(input *smart.ModelInput, metadata *C.Metadata,
+	baseWeight float64, proxyName string, ModelPredicted bool) {
 
 	// 采样率控制
 	if s.sampleRate < 1.0 && rand.Float64() > s.sampleRate {
 		return
 	}
 
-	input := lightgbm.CreateModelInputFromStatsRecord(
-		record, metadata,
-		uploadTotal, downloadTotal, maxUploadRate, maxDownloadRate,
-		wildcardTarget,
-	)
+	input.GroupName = s.Name()
+	input.NodeName = proxyName
+	weightSource := "Traditional"
 
-	if input != nil {
-		input.GroupName = s.Name()
-		input.NodeName = proxyName
-		weightSource := "Traditional"
-
-		if ModelPredicted {
-			weightSource = "LightGBM"
-		}
-
-		s.dataCollector.AddSample(input, metadata, baseWeight, weightSource)
+	if ModelPredicted {
+		weightSource = "LightGBM"
 	}
+
+	s.dataCollector.AddSample(input, metadata, baseWeight, weightSource)
+
 }
 
 func updateAverageValueInt(oldValue int64, newValue int64) int64 {
@@ -1204,9 +1197,6 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 		s.onDialSuccess()
 	}
 
-	success := atomicRecord.Get("success").(int64)
-	failure := atomicRecord.Get("failure").(int64)
-
 	if connectTime > 0 {
 		oldConnectTime := atomicRecord.Get("connectTime").(int64)
 		newConnectTime := updateAverageValueInt(oldConnectTime, connectTime)
@@ -1219,10 +1209,11 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 		atomicRecord.Set("latency", newLatency)
 	}
 
-	connectTimeVal := atomicRecord.Get("connectTime").(int64)
-	latencyVal := atomicRecord.Get("latency").(int64)
+	if connectionDuration > 0 {
+		s.updateConnectionDuration(atomicRecord, connectionDuration)
+	}
+
 	lastUsedVal := atomicRecord.Get("lastUsed").(int64)
-	durationVal := atomicRecord.Get("duration").(float64)
 	oldWeight := atomicRecord.GetWeight(weightType)
 
 	uploadTotalMB := float64(uploadTotal) / (1024.0 * 1024.0)
@@ -1232,10 +1223,6 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 
 	atomicRecord.Add("uploadTotal", uploadTotalMB)
 	atomicRecord.Add("downloadTotal", downloadTotalMB)
-
-	if connectionDuration > 0 {
-		s.updateConnectionDuration(atomicRecord, connectionDuration)
-	}
 
 	oldMaxUploadRate := atomicRecord.Get("maxUploadRate").(float64)
 	if maxUploadRateKB > oldMaxUploadRate {
@@ -1247,24 +1234,15 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 		atomicRecord.Set("maxDownloadRate", maxDownloadRateKB)
 	}
 
+	input := lightgbm.CreateModelInputFromStatsRecord(
+		atomicRecord, metadata,
+		uploadTotalMB, downloadTotalMB, maxUploadRateKB, maxDownloadRateKB, wildcardTarget,
+	)
+
 	if s.useLightGBM && s.weightModel != nil {
-		tempRecord := atomicRecord.CreateStatsSnapshot()
-		input := lightgbm.CreateModelInputFromStatsRecord(
-			tempRecord, metadata,
-			uploadTotalMB, downloadTotalMB, maxUploadRateKB, maxDownloadRateKB, wildcardTarget,
-		)
-		if input != nil {
-			calculatedWeight, ModelPredicted = s.weightModel.PredictWeight(status == "closed", input, priorityFactor)
-		} else {
-			calculatedWeight = smart.CalculateWeight(
-				status == "closed", success, failure, connectTimeVal, latencyVal,
-				metadata.NetWork == C.UDP, uploadTotalMB, downloadTotalMB, maxUploadRateKB, maxDownloadRateKB, durationVal, lastUsedVal) * priorityFactor
-			ModelPredicted = false
-		}
+		calculatedWeight, ModelPredicted = s.weightModel.PredictWeight(input, priorityFactor)
 	} else {
-		calculatedWeight = smart.CalculateWeight(
-			status == "closed", success, failure, connectTimeVal, latencyVal,
-			metadata.NetWork == C.UDP, uploadTotalMB, downloadTotalMB, maxUploadRateKB, maxDownloadRateKB, durationVal, lastUsedVal) * priorityFactor
+		calculatedWeight = smart.CalculateWeight(input) * priorityFactor
 		ModelPredicted = false
 	}
 
@@ -1281,17 +1259,18 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 
 	baseWeight := degradedWeight / priorityFactor
 
-	atomicRecord.SetWeight(weightType, degradedWeight, metadata.NetWork == C.UDP)
-
-	statsSnapshot := atomicRecord.CreateStatsSnapshot()
-
 	// 数据收集
 	if s.collectData {
-		s.collectConnectionData(statsSnapshot, metadata, uploadTotalMB, downloadTotalMB, maxUploadRateKB, maxDownloadRateKB, baseWeight, proxy.Name(), wildcardTarget, ModelPredicted)
+		s.collectConnectionData(input, metadata, baseWeight, proxy.Name(), ModelPredicted)
 	}
 
+	// 更新记录
+	atomicRecord.Set("lastUsed", time.Now().Unix())
+	atomicRecord.SetWeight(weightType, degradedWeight, metadata.NetWork == C.UDP)
+	statsSnapshot := atomicRecord.CreateStatsSnapshot()
+
 	// 保存统计记录
-	s.saveStatsRecord(target, proxy, statsSnapshot, time.Now().Unix())
+	s.saveStatsRecord(target, proxy, statsSnapshot)
 
 	// 日志输出
 	s.logConnectionStats(status, statsSnapshot, metadata, baseWeight, priorityFactor, addressDisplay, proxy.Name(),
@@ -1353,9 +1332,6 @@ func (s *Smart) checkNodeQualityDegradation(
 	weightType, networkType string, lastUsedVal int64,
 	target, host, asnInfo string, isUDP bool) (float64, bool) {
 
-	now := time.Now().Unix()
-	cooldownSeconds := int64(600)
-
 	if asnInfo != "" {
 		addressDisplay += fmt.Sprintf(" (ASN: %s)", asnInfo)
 	}
@@ -1392,10 +1368,10 @@ func (s *Smart) checkNodeQualityDegradation(
 		if selectedProxy != nil {
 			cacheKey := smart.FormatDBKey(smart.KeyTypeStats, s.configName, s.Name(), target, (*selectedProxy).Name())
 			record := s.store.GetOrCreateAtomicRecord(cacheKey, s.Name(), s.configName, target, (*selectedProxy).Name())
-			boostedWeight := math.Max(record.GetWeight(weightType), oldWeight * 1.5)
+			boostedWeight := math.Max(record.GetWeight(weightType), oldWeight)
 			record.SetWeight(weightType, boostedWeight, isUDP)
 			statsSnapshot := record.CreateStatsSnapshot()
-			s.saveStatsRecord(target, *selectedProxy, statsSnapshot, now)
+			s.saveStatsRecord(target, *selectedProxy, statsSnapshot)
 			updateNodes = append(updateNodes, (*selectedProxy).Name())
 			updateWeights = append(updateWeights, boostedWeight)
 		}
@@ -1412,6 +1388,9 @@ func (s *Smart) checkNodeQualityDegradation(
 	if s.selected != "" {
 		return newWeight, false
 	}
+
+	now := time.Now().Unix()
+	cooldownSeconds := int64(600)
 
 	if status == "failed" && blockEnabled {
 		findExpectedNode(host, newWeight)
@@ -1437,7 +1416,7 @@ func (s *Smart) checkNodeQualityDegradation(
 			if stats.LastFailure > 0 && stats.LastFailure + 5 > now {
 				checkLimit = true
 			}
-			if stats.FailureCount > targetFailureLimit {
+			if stats.FailureCount > targetFailureLimit && lastUsedVal > 0 {
 				log.Debugln("[Smart] Connection [%s] - [%s] - [%s] - [%s] detected target block due to repeated failures, stop node quality check ...",
 					s.Name(), proxyName, networkType, addressDisplay)
 				blockEnabled = true

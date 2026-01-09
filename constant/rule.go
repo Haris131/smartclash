@@ -27,6 +27,8 @@ const (
 	ProcessPath
 	ProcessNameRegex
 	ProcessPathRegex
+	ProcessNameWildcard
+	ProcessPathWildcard
 	RuleSet
 	Network
 	Uid
@@ -40,21 +42,19 @@ const (
 type RuleType int
 
 var SmartRuleTypes = map[RuleType]bool{
-	Domain:          true,
-	DomainSuffix:    true,
-	DomainKeyword:   true,
-	DomainRegex:     true,
-	DomainWildcard:  true,
-	GEOSITE:         true,
-	IPASN:           true,
-	IPCIDR:          true,
-	IPSuffix:        true,
-	DstPort:         true,
-	RuleSet:         true,
-	SubRules:        true,
-	AND:             true,
-	OR:              true,
-	NOT:             true,
+	Domain:            true,
+	DomainSuffix:      true,
+	DomainKeyword:     true,
+	DomainRegex:       true,
+	DomainWildcard:    true,
+	GEOSITE:           true,
+	IPASN:             true,
+	IPCIDR:            true,
+	IPSuffix:          true,
+	RuleSet:           true,
+	SubRules:          true,
+	AND:               true,
+	OR:                true,
 }
 
 func (rt RuleType) String() string {
@@ -107,6 +107,10 @@ func (rt RuleType) String() string {
 		return "ProcessNameRegex"
 	case ProcessPathRegex:
 		return "ProcessPathRegex"
+	case ProcessNameWildcard:
+		return "ProcessNameWildcard"
+	case ProcessPathWildcard:
+		return "ProcessPathWildcard"
 	case MATCH:
 		return "Match"
 	case RuleSet:
