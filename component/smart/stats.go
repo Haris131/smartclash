@@ -1287,6 +1287,7 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			keyType string
 			target  string
 			time    time.Time
+			value   float64
 		}
 		var invalidTargets []targetInfo
 		var validTargets []targetInfo
@@ -1299,6 +1300,7 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			target := parts[len(parts)-1]
 
 			var lastTime int64
+			var value float64
 			switch keyType {
 			case KeyTypeStats:
 				var record StatsRecord
@@ -1306,23 +1308,31 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 					continue
 				}
 				lastTime = record.LastUsed
+				// 优先保留使用率高
+				value = float64(record.Success + record.Failure)
 			case KeyTypePrefetch:
 				var pm PrefetchMap
 				if err := json.Unmarshal(data, &pm); err != nil {
 					continue
 				}
 				lastTime = pm.UpdatedTime
+				// 优先保留长期积累
+				value = float64(len(pm.TCP.Nodes) + len(pm.UDP.Nodes))
+				maxTargets = maxTargets / 2
 			case KeyTypeTargetFailures:
 				var stats TargetFailureStats
 				if err := json.Unmarshal(data, &stats); err != nil {
 					continue
 				}
 				lastTime = stats.LastFailure
+				// 优先保留长期积累
+				value = float64(stats.FailureCount)
+				maxTargets = maxTargets / 2
 			default:
 				continue
 			}
 
-			info := targetInfo{keyType: keyType, target: target, time: time.Unix(lastTime, 0)}
+			info := targetInfo{keyType: keyType, target: target, time: time.Unix(lastTime, 0), value: value}
 			if lastTime <= 0 {
 				invalidTargets = append(invalidTargets, info)
 			} else {
@@ -1335,7 +1345,7 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			continue
 		}
 
-		toDeleteCount := totalRecords - maxTargets
+		toDeleteCount := totalRecords - maxTargets + maxTargets / 4
 		deleted := 0
 		for _, info := range invalidTargets {
 			if deleted >= toDeleteCount {
@@ -1348,6 +1358,9 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 		if deleted < toDeleteCount {
 			remaining := toDeleteCount - deleted
 			sort.Slice(validTargets, func(i, j int) bool {
+				if validTargets[i].value != validTargets[j].value {
+					return validTargets[i].value < validTargets[j].value
+				}
 				return validTargets[i].time.Before(validTargets[j].time)
 			})
 			for i := 0; i < remaining && i < len(validTargets); i++ {
@@ -1356,8 +1369,8 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			}
 		}
 
-		log.Debugln("[SmartStore] Cleaned up [%d] old %s records, keeping the latest [%d] (group %s)",
-			deleted, keyType, maxTargets, group)
+		log.Debugln("[SmartStore] Cleaned up [%d] old %s records, keeping valuable and recent data (group %s)",
+			deleted, keyType, group)
 	}
 
 	return nil
