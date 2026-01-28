@@ -1,26 +1,12 @@
 name: Tiny Build
 on:
   workflow_dispatch:
-  push:
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - ".github/ISSUE_TEMPLATE/**"
-    branches:
-      - Alpha-smart
-    tags:
-      - "v*"
-  pull_request:
-    branches:
-      - Alpha-smart
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
-
 permissions:
   contents: write
   packages: write
-
 jobs:
   build-armv7-tinygo:
     runs-on: ubuntu-latest
@@ -49,13 +35,11 @@ jobs:
       env:
         GOOS: linux
         GOARCH: arm
-        GOARM: 7
       run: |
         tinygo version
         tinygo build -o mihomo-armv7 \
           -tags "with_gvisor" \
-          -target=arm \
-          -arm=7 \
+          -target=armv7-linux-gnueabihf \
           -ldflags "${BUILDTAG} -X github.com/metacubex/mihomo/constant.Version=${VERSION} -X github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME} -w -s"
 
     # --- Compress artifact to .gz ---
