@@ -1,0 +1,75 @@
+name: Build
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag version to release"
+        required: true
+  push:
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".github/ISSUE_TEMPLATE/**"
+    branches:
+      - Alpha-smart
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - Alpha-smart
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-armv7-tinygo:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    # --- Set build environment variables ---
+    - name: Set build environment
+      run: |
+        echo "BUILDTIME=$(TZ=Asia/Jakarta date)" >> $GITHUB_ENV
+        echo "CGO_ENABLED=0" >> $GITHUB_ENV
+        echo "BUILDTAG=-extldflags --static" >> $GITHUB_ENV
+        echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
+        VERSION="${GITHUB_REF_NAME,,}-$(git rev-parse --short HEAD)"
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+    # --- Install TinyGo ---
+    - name: Set up TinyGo
+      uses: acifani/setup-tinygo@v2
+      with:
+        tinygo-version: '0.30.0'
+        install-binaryen: false
+
+    # --- Build with TinyGo ---
+    - name: Build mihomo (TinyGo Linux ARMv7)
+      env:
+        GOOS: linux
+        GOARCH: arm
+        GOARM: 7
+      run: |
+        tinygo version
+        tinygo build -o mihomo-armv7 \
+          -tags "with_gvisor" \
+          -target=arm \
+          -arm=7 \
+          -ldflags "${BUILDTAG} -X github.com/metacubex/mihomo/constant.Version=${VERSION} -X github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME} -w -s"
+
+    # --- Compress artifact to .gz ---
+    - name: Compress artifact
+      run: |
+        gzip -c mihomo-armv7 > smartclash-tiny-linux-armv7-${VERSION}.gz
+
+    # --- Upload artifact ---
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: smartclash-tiny-linux-armv7
+        path: smartclash-tiny-linux-armv7-${VERSION}.gz
