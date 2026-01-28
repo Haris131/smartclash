@@ -1,10 +1,6 @@
 name: Tiny Build
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Tag version to release"
-        required: true
   push:
     paths-ignore:
       - "docs/**"
