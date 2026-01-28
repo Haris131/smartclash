@@ -1,4 +1,4 @@
-name: Build
+name: Tiny Build
 on:
   workflow_dispatch:
     inputs:
