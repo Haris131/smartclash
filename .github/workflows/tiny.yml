@@ -40,7 +40,7 @@ jobs:
         tinygo version
         tinygo build -o mihomo-armv7 \
           -tags "with_gvisor" \
-          -target=armv7-linux-gnueabihf \
+          -target=arm \
           -ldflags "${BUILDTAG} -X github.com/metacubex/mihomo/constant.Version=${VERSION} -X github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME} -w -s"
 
     # --- Compress artifact to .gz ---
