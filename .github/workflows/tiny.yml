@@ -47,7 +47,7 @@ jobs:
         GOOS: linux
         GOARCH: arm
       run: |
-        find /opt/hostedtoolcache/tinygo/0.30.0/amd64/tinygo/targets
+        find /opt/hostedtoolcache/tinygo/
         tinygo version
         tinygo build -o mihomo-armv7 \
           -tags "with_gvisor" \
