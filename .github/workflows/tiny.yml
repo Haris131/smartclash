@@ -11,6 +11,14 @@ jobs:
   build-armv7-tinygo:
     runs-on: ubuntu-latest
     steps:
+    - name: Prepare & Install dependencies
+      run: |
+        sudo dpkg --add-architecture armhf
+        sudo apt-get update
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y apt-utils
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y \
+          gcc-arm-linux-gnueabihf
+          
     - uses: actions/checkout@v5
 
     # --- Set build environment variables ---
@@ -22,12 +30,15 @@ jobs:
         echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
         VERSION="${GITHUB_REF_NAME,,}-$(git rev-parse --short HEAD)"
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
-
-    # --- Install TinyGo ---
-    - name: Set up TinyGo
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 1.23
+        
+    - name: Setup TinyGo
       uses: acifani/setup-tinygo@v2
       with:
-        tinygo-version: '0.30.0'
+        tinygo-version: '0.40.1'
         install-binaryen: false
 
     # --- Build with TinyGo ---
