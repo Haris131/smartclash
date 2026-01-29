@@ -9,7 +9,7 @@ permissions:
   packages: write
 jobs:
   build-armv7-tinygo:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-arm
     steps:
     - name: Prepare & Install dependencies
       run: |
