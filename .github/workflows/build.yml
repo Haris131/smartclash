@@ -10,6 +10,7 @@ on:
       - "docs/**"
       - "README.md"
       - ".github/ISSUE_TEMPLATE/**"
+      - ".github/workflows/tiny.yml"
     branches:
       - Alpha-smart
     tags:
