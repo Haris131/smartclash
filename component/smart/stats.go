@@ -1341,7 +1341,7 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 		}
 
 		totalRecords := len(invalidTargets) + len(validTargets)
-		if totalRecords <= maxTargets {
+		if totalRecords <= maxTargets * 2 {
 			continue
 		}
 
