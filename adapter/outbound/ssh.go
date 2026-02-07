@@ -31,6 +31,7 @@ type Ssh struct {
 	httpTunnelAddr      string
 	httpTunnelStarted   bool
 	httpTunnelMutex     sync.Mutex
+	connPool            *connPool
 }
 
 type SshOption struct {
@@ -54,6 +55,57 @@ type SshOption struct {
 		RemotePayload string `proxy:"remote-payload,omitempty"`
 		BufferSize    uint64 `proxy:"buffer-size,omitempty"`
 	} `proxy:"tunnel,omitempty"`
+}
+
+// connPool manages reusable connections to reduce memory usage
+type connPool struct {
+	mu    sync.Mutex
+	conns map[string]*ssh.Client
+}
+
+func newConnPool() *connPool {
+	return &connPool{
+		conns: make(map[string]*ssh.Client),
+	}
+}
+
+func (p *connPool) get(key string) (*ssh.Client, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	client, ok := p.conns[key]
+	if ok && client != nil {
+		// Test if connection is still alive
+		_, _, err := client.SendRequest("keepalive", false, nil)
+		if err == nil {
+			return client, true
+		}
+		// Remove dead connection
+		delete(p.conns, key)
+	}
+	return nil, false
+}
+
+func (p *connPool) put(key string, client *ssh.Client) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.conns[key] = client
+}
+
+func (p *connPool) remove(key string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.conns, key)
+}
+
+func (p *connPool) clear() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for key, client := range p.conns {
+		if client != nil {
+			client.Close()
+		}
+		delete(p.conns, key)
+	}
 }
 
 // DialContext implements C.ProxyAdapter
@@ -105,13 +157,18 @@ func (s *Ssh) startHTTPTunnelServer() (string, error) {
 	// Format remote address
 	remoteAddr := fmt.Sprintf("%s:%d", s.option.Tunnel.Proxy.IP, s.option.Tunnel.Proxy.Port)
 	
-	// Create tunnel configuration
+	// Create tunnel configuration with optimized buffer size
 	config := &ssh_http.Config{
 		LocalAddress:  "", // Use random port
 		RemoteAddress: remoteAddr,
 		LocalPayload:  s.option.Tunnel.Payload,
 		RemotePayload: s.option.Tunnel.RemotePayload,
 		BufferSize:    s.option.Tunnel.BufferSize,
+	}
+	
+	// Set default buffer size if not specified (reduced from 65535 to 8192)
+	if config.BufferSize == 0 {
+		config.BufferSize = 8192
 	}
 	
 	// Create and start HTTP tunnel server
@@ -131,9 +188,23 @@ func (s *Ssh) startHTTPTunnelServer() (string, error) {
 
 // connectViaHTTPTunnel establishes SSH connection through HTTP CONNECT tunnel
 func (s *Ssh) connectViaHTTPTunnel(ctx context.Context, metadata *C.Metadata, tunnelAddr string) (_ C.Conn, err error) {
-	// Connect to local HTTP tunnel server
+	// Use connection pooling for tunnel connections
+	connKey := fmt.Sprintf("%s:%s", tunnelAddr, s.addr)
+	
+	// Try to get existing connection from pool
+	if client, ok := s.connPool.get(connKey); ok {
+		sshConn, err := client.DialContext(ctx, "tcp", metadata.RemoteAddress())
+		if err == nil {
+			return NewConn(sshConn, s), nil
+		}
+		// Remove dead connection from pool
+		s.connPool.remove(connKey)
+	}
+	
+	// Connect to local HTTP tunnel server with timeout
 	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
+		Timeout: 5 * time.Second,
+		KeepAlive: 30 * time.Second,
 	}
 	
 	conn, err := dialer.DialContext(ctx, "tcp", tunnelAddr)
@@ -142,7 +213,7 @@ func (s *Ssh) connectViaHTTPTunnel(ctx context.Context, metadata *C.Metadata, tu
 	}
 	
 	// Send HTTP CONNECT request
-	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", 
+	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\n\r\n", 
 		s.addr, s.addr)
 	if _, err := conn.Write([]byte(connectReq)); err != nil {
 		conn.Close()
@@ -150,8 +221,8 @@ func (s *Ssh) connectViaHTTPTunnel(ctx context.Context, metadata *C.Metadata, tu
 	}
 	
 	// Read HTTP response with timeout
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	buf := make([]byte, 1024)
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 512) // Reduced buffer size
 	n, err := conn.Read(buf)
 	conn.SetReadDeadline(time.Time{}) // Clear deadline
 	
@@ -182,9 +253,13 @@ func (s *Ssh) connectViaHTTPTunnel(ctx context.Context, metadata *C.Metadata, tu
 	
 	client := ssh.NewClient(clientConn, chans, reqs)
 	
+	// Store connection in pool
+	s.connPool.put(connKey, client)
+	
 	// Dial target through SSH
 	sshConn, err := client.DialContext(ctx, "tcp", metadata.RemoteAddress())
 	if err != nil {
+		s.connPool.remove(connKey)
 		client.Close()
 		conn.Close()
 		return nil, fmt.Errorf("failed to dial target through SSH: %w", err)
@@ -196,6 +271,7 @@ func (s *Ssh) connectViaHTTPTunnel(ctx context.Context, metadata *C.Metadata, tu
 		ssh:    client,
 		tunnel: conn,
 		closer: s,
+		connKey: connKey,
 	}
 	
 	return NewConn(wrappedConn, s), nil
@@ -204,18 +280,18 @@ func (s *Ssh) connectViaHTTPTunnel(ctx context.Context, metadata *C.Metadata, tu
 // httpTunnelConn wraps connections for proper cleanup
 type httpTunnelConn struct {
 	net.Conn
-	ssh    *ssh.Client
-	tunnel net.Conn
-	closer *Ssh
+	ssh     *ssh.Client
+	tunnel  net.Conn
+	closer  *Ssh
+	connKey string
 }
 
 func (c *httpTunnelConn) Close() error {
 	var errs []error
 	
-	if c.ssh != nil {
-		if err := c.ssh.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("ssh client close: %w", err))
-		}
+	if c.ssh != nil && c.closer != nil && c.connKey != "" {
+		// Don't close SSH client, return it to pool for reuse
+		// The pool will handle cleanup of dead connections
 	}
 	
 	if c.tunnel != nil {
@@ -236,19 +312,27 @@ func (c *httpTunnelConn) Close() error {
 	return nil
 }
 
-// connect establishes direct SSH connection
+// connect establishes direct SSH connection with connection pooling
 func (s *Ssh) connect(ctx context.Context, addr string) (client *ssh.Client, err error) {
 	s.cMutex.Lock()
 	defer s.cMutex.Unlock()
 	
-	// Return existing client if available
+	// Return existing client if available and alive
 	if s.client != nil {
-		return s.client, nil
+		// Test if connection is still alive
+		_, _, err := s.client.SendRequest("keepalive", false, nil)
+		if err == nil {
+			return s.client, nil
+		}
+		// Connection is dead, close it
+		s.client.Close()
+		s.client = nil
 	}
 	
-	// Dial SSH server
+	// Dial SSH server with optimized timeout
 	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
 	}
 	
 	c, err := dialer.DialContext(ctx, "tcp", addr)
@@ -277,7 +361,6 @@ func (s *Ssh) connect(ctx context.Context, addr string) (client *ssh.Client, err
 	// Monitor connection and cleanup when closed
 	go func() {
 		_ = client.Wait()
-		_ = client.Close()
 		s.cMutex.Lock()
 		defer s.cMutex.Unlock()
 		if s.client == client {
@@ -302,9 +385,14 @@ func (s *Ssh) Close() error {
 	
 	var errs []error
 	
+	// Clear connection pool
+	if s.connPool != nil {
+		s.connPool.clear()
+	}
+	
 	// Stop HTTP tunnel server if running
 	if s.httpTunnelServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		
 		done := make(chan error, 1)
@@ -349,7 +437,7 @@ func NewSsh(option SshOption) (*Ssh, error) {
 		User:              option.UserName,
 		HostKeyCallback:   ssh.InsecureIgnoreHostKey(),
 		HostKeyAlgorithms: option.HostKeyAlgorithms,
-		Timeout:           15 * time.Second,
+		Timeout:           10 * time.Second, // Reduced from 15 to 10 seconds
 	}
 
 	// Private key authentication
@@ -429,8 +517,9 @@ func NewSsh(option SshOption) (*Ssh, error) {
 			rmark:  option.RoutingMark,
 			prefer: option.IPVersion,
 		},
-		option: &option,
-		config: &config,
+		option:   &option,
+		config:   &config,
+		connPool: newConnPool(),
 	}
 	outbound.dialer = option.NewDialer(outbound.DialOptions())
 	return outbound, nil
