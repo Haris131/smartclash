@@ -14,11 +14,14 @@ import (
 type Server struct {
 	config        *Config
 	listener      net.Listener
-	mu            sync.Mutex
+	mu            sync.RWMutex
 	running       bool
 	localAddr     string
 	connections   map[uint64]*Tunnel
 	remoteAddrStr string
+	shutdownChan  chan struct{}
+	acceptChan    chan net.Conn
+	acceptErrChan chan error
 }
 
 // Config contains HTTP tunnel server configuration
@@ -37,6 +40,9 @@ func NewServer(config *Config) *Server {
 		running:       false,
 		connections:   make(map[uint64]*Tunnel),
 		remoteAddrStr: config.RemoteAddress,
+		shutdownChan:  make(chan struct{}),
+		acceptChan:    make(chan net.Conn, 10),
+		acceptErrChan: make(chan error, 1),
 	}
 }
 
@@ -77,42 +83,92 @@ func (s *Server) Start() (string, error) {
 	return s.localAddr, nil
 }
 
-// acceptLoop accepts incoming connections
+// acceptLoop accepts incoming connections with cancellable accept
 func (s *Server) acceptLoop(lAddr *net.TCPAddr) {
 	var connId = uint64(0)
+	
+	// Goroutine untuk menerima koneksi
+	go func() {
+		for {
+			conn, err := s.listener.Accept()
+			if err != nil {
+				select {
+				case s.acceptErrChan <- err:
+				default:
+				}
+				return
+			}
+			select {
+			case s.acceptChan <- conn:
+			case <-s.shutdownChan:
+				conn.Close()
+				return
+			}
+		}
+	}()
+	
 	for {
-		conn, err := s.listener.Accept()
-		if err != nil {
+		select {
+		case <-s.shutdownChan:
+			return
+		case err := <-s.acceptErrChan:
 			if errors.Is(err, net.ErrClosed) {
 				log.Debugln("[SSH-HTTP] Listener closed")
 				return
 			}
 			log.Errorln("[SSH-HTTP] Failed to accept connection: %s", err)
+			// Continue listening for new connections
+			go func() {
+				conn, err := s.listener.Accept()
+				if err != nil {
+					select {
+					case s.acceptErrChan <- err:
+					default:
+					}
+					return
+				}
+				select {
+				case s.acceptChan <- conn:
+				case <-s.shutdownChan:
+					conn.Close()
+				}
+			}()
 			continue
+		case conn := <-s.acceptChan:
+			connId += 1
+			s.handleConnection(connId, conn, lAddr)
 		}
-		connId += 1
-
-		// Create new tunnel for connection
-		tunnel := NewTunnel(connId, conn, lAddr, s.remoteAddrStr)
-		if s.config.BufferSize > 0 {
-			tunnel.SetBufferSize(s.config.BufferSize)
-		}
-		tunnel.SetLocalPayload(s.config.LocalPayload)
-		tunnel.SetRemotePayload(s.config.RemotePayload)
-		
-		// Store tunnel
-		s.mu.Lock()
-		s.connections[connId] = tunnel
-		s.mu.Unlock()
-		
-		// Start tunnel in goroutine
-		go func(t *Tunnel, id uint64) {
-			t.Start()
-			s.mu.Lock()
-			delete(s.connections, id)
-			s.mu.Unlock()
-		}(tunnel, connId)
 	}
+}
+
+// handleConnection handles a single accepted connection
+func (s *Server) handleConnection(connId uint64, conn net.Conn, lAddr *net.TCPAddr) {
+	// Create new tunnel for connection
+	tunnel := NewTunnel(connId, conn, lAddr, s.remoteAddrStr)
+	if s.config.BufferSize > 0 {
+		tunnel.SetBufferSize(s.config.BufferSize)
+	}
+	tunnel.SetLocalPayload(s.config.LocalPayload)
+	tunnel.SetRemotePayload(s.config.RemotePayload)
+	
+	// Store tunnel
+	s.mu.Lock()
+	s.connections[connId] = tunnel
+	s.mu.Unlock()
+	
+	// Start tunnel in goroutine
+	go func(t *Tunnel, id uint64) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorln("[SSH-HTTP] Recovered from panic in tunnel #%d: %v", id, r)
+			}
+		}()
+		
+		t.Start()
+		s.mu.Lock()
+		delete(s.connections, id)
+		s.mu.Unlock()
+	}(tunnel, connId)
 }
 
 // Stop stops the server with graceful shutdown
@@ -125,6 +181,7 @@ func (s *Server) Stop() error {
 	}
 	
 	s.running = false
+	close(s.shutdownChan)
 	
 	// Close all active connections
 	for id, tunnel := range s.connections {
@@ -149,20 +206,24 @@ func (s *Server) Stop() error {
 		}
 	}
 	
+	// Close channels
+	close(s.acceptChan)
+	close(s.acceptErrChan)
+	
 	log.Infoln("[SSH-HTTP] Tunnel server stopped")
 	return nil
 }
 
 // GetLocalAddr returns the local address the server is listening on
 func (s *Server) GetLocalAddr() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.localAddr
 }
 
 // IsRunning returns whether the server is running
 func (s *Server) IsRunning() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.running
 }
