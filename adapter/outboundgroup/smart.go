@@ -38,7 +38,7 @@ import (
 
 const (
 	prefetchInterval         = 10 * time.Minute
-	cleanupInterval          = 30 * time.Minute
+	cleanupInterval          = 120 * time.Minute
 	cacheParamAdjustInterval = 5 * time.Minute
 	recoveryCheckInterval    = 5 * time.Minute
 	checkInterval            = 10 * time.Minute
@@ -399,13 +399,17 @@ func (s *Smart) WrapConnWithMetric(c C.Conn, proxy C.Proxy, metadata *C.Metadata
 
 	if N.NeedHandshake(c) {
 		c = callback.NewFirstWriteCallBackConn(c, func(err error) {
-			*firstWriteErr = err
+			if err != nil {
+				*firstWriteErr = err
+			}
 		})
 	}
 
 	c = callback.NewFirstReadCallBackConn(c, func(err error) {
 		*firstReadLatency = time.Since(start).Milliseconds()
-		*firstReadErr = err
+		if err != nil {
+			*firstReadErr = err
+		}
 	})
 
 	return s.registerClosureMetricsCallback(
@@ -719,7 +723,7 @@ func (s *Smart) startTimedTask(initialDelay, interval time.Duration, taskName st
 			return
 		} else {
 			log.Debugln("[Smart] Task %s for group [%s] started, interval: %s",
-				taskName, s.Name(), adjustedInterval.String())
+				taskName, s.Name(), adjustedInterval.Round(time.Second).String())
 		}
 
 		ticker := time.NewTicker(adjustedInterval)
@@ -1175,11 +1179,6 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 		if proxy.Type() == C.Reject || proxy.Type() == C.Pass || proxy.Type() == C.RejectDrop {
 			return
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				return
-			}
-		}()
 		atomicRecord.Add("failure", int64(1))
 		s.onDialFailed(proxy.Type(), err, s.healthCheck)
 		if s.failedTimes > s.maxFailedTimes {
@@ -1268,7 +1267,6 @@ func (s *Smart) recordConnectionStats(status string, metadata *C.Metadata, proxy
 	s.logConnectionStats(status, statsSnapshot, metadata, baseWeight, priorityFactor, addressDisplay, proxy.Name(),
 		uploadTotalMB, downloadTotalMB, maxUploadRateKB, maxDownloadRateKB, connectionDuration, asnInfo, ModelPredicted)
 }
-
 
 func (s *Smart) registerClosureMetricsCallback(c C.Conn, proxy C.Proxy, metadata *C.Metadata, connectTime int64, firstReadLatency *int64, firstReadErr *error, firstWriteErr *error) C.Conn {
 	return callback.NewCloseCallbackConn(c, func() {

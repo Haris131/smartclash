@@ -336,7 +336,7 @@ func (s *Store) DeleteUnwrapResult(group, config string, target string, asnNumbe
 }
 
 func (s * Store) ClearUnwrapResult(group, config string) {
-	cachePrefix := fmt.Sprintf("%s:%s:%s", config, group, "")
+	cachePrefix := fmt.Sprintf("%s:%s:", config, group)
 	unwrapCache.RemoveByKeyPrefix(cachePrefix)
 }
 
