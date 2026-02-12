@@ -157,7 +157,6 @@ jobs:
 
           - { goos: linux, goarch: arm64, output: arm64-go124, debian: arm64, rpm: aarch64, pacman: aarch64, goversion: '1.24'}
           - { goos: linux, goarch: arm64, output: arm64-go123, debian: arm64, rpm: aarch64, pacman: aarch64, goversion: '1.23'}
-          - { goos: linux, goarch: arm, goarm: '7', output: armv7-go124, debian: armhf, rpm: armv7hl, pacman: armv7hl, goversion: '1.24'}
           - { goos: linux, goarch: arm, goarm: '7', output: armv7-go123, debian: armhf, rpm: armv7hl, pacman: armv7hl, goversion: '1.23'}
 
           # only for test
