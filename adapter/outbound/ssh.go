@@ -15,7 +15,7 @@ import (
 	N "github.com/metacubex/mihomo/common/net"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/log"
-	"github.com/metacubex/mihomo/tunnel/ssh_http"
+	"github.com/metacubex/mihomo/transport/ssh-http"
 
 	"github.com/metacubex/randv2"
 	"golang.org/x/crypto/ssh"
