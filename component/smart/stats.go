@@ -1286,16 +1286,16 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			time    time.Time
 			value   float64
 		}
-		var invalidTargets []targetInfo
-		var validTargets []targetInfo
+		targetMap := make(map[string]*targetInfo)
 
 		for path, data := range rawData {
 			parts := strings.Split(path, "/")
-			if len(parts) < 4 {
+			if len(parts) < 5 {
 				continue
 			}
-			target := parts[len(parts)-1]
+			target := parts[4]
 
+			// 优先保留使用频率高和最近使用的记录
 			var lastTime int64
 			var value float64
 			switch keyType {
@@ -1305,7 +1305,6 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 					continue
 				}
 				lastTime = record.LastUsed
-				// 优先保留使用率高
 				value = float64(record.Success + record.Failure)
 			case KeyTypePrefetch:
 				var pm PrefetchMap
@@ -1313,7 +1312,6 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 					continue
 				}
 				lastTime = pm.UpdatedTime
-				// 优先保留长期积累
 				value = float64(len(pm.TCP.Nodes) + len(pm.UDP.Nodes))
 				maxTargets = maxTargets / 2
 			case KeyTypeTargetFailures:
@@ -1322,33 +1320,55 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 					continue
 				}
 				lastTime = stats.LastFailure
-				// 优先保留长期积累
 				value = float64(stats.FailureCount)
 				maxTargets = maxTargets / 2
 			default:
 				continue
 			}
 
-			info := targetInfo{keyType: keyType, target: target, time: time.Unix(lastTime, 0), value: value}
-			if lastTime <= 0 {
-				invalidTargets = append(invalidTargets, info)
+			// stats has multiple entries per target (per node), need to aggregate
+			if info, exists := targetMap[target]; exists {
+				if lastTime > info.time.Unix() {
+					info.time = time.Unix(lastTime, 0)
+				}
+				info.value += value
 			} else {
-				validTargets = append(validTargets, info)
+				targetMap[target] = &targetInfo{
+					keyType: keyType,
+					target:  target,
+					time:    time.Unix(lastTime, 0),
+					value:   value,
+				}
 			}
 		}
 
-		totalRecords := len(invalidTargets) + len(validTargets)
+		var invalidTargets []targetInfo
+		var validTargets []targetInfo
+		for _, info := range targetMap {
+			if info.time.Unix() <= 0 {
+				invalidTargets = append(invalidTargets, *info)
+			} else {
+				validTargets = append(validTargets, *info)
+			}
+		}
+
+		totalRecords := len(targetMap)
 		if totalRecords <= maxTargets * 2 {
 			continue
 		}
 
 		toDeleteCount := totalRecords - maxTargets + maxTargets / 4
 		deleted := 0
+
 		for _, info := range invalidTargets {
 			if deleted >= toDeleteCount {
 				break
 			}
-			s.DBBatchDeletePrefix(FormatDBKey(info.keyType, config, group, info.target), false)
+			deleteKey := FormatDBKey(info.keyType, config, group, info.target)
+			if delErr := s.DBBatchDeletePrefix(deleteKey, false); delErr != nil {
+				log.Debugln("[SmartStore] Failed to clean invalid [%s] for keyType [%s], group [%s]: %v", info.target, info.keyType, group, delErr)
+				continue
+			}
 			deleted++
 		}
 
@@ -1361,13 +1381,20 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 				return validTargets[i].time.Before(validTargets[j].time)
 			})
 			for i := 0; i < remaining && i < len(validTargets); i++ {
-				s.DBBatchDeletePrefix(FormatDBKey(validTargets[i].keyType, config, group, validTargets[i].target), false)
+				info := validTargets[i]
+				deleteKey := FormatDBKey(info.keyType, config, group, info.target)
+				if delErr := s.DBBatchDeletePrefix(deleteKey, false); delErr != nil {
+					log.Debugln("[SmartStore] Failed to clean valid [%s] for keyType [%s], group [%s]: %v", info.target, info.keyType, group, delErr)
+					continue
+				}
 				deleted++
 			}
 		}
 
+		dbResultCache.RemoveByKeyPrefix(pathPrefix)
+
 		log.Debugln("[SmartStore] Cleaned up [%d] old [%s] records, group [%s] keeping [%d] valuable and recent data...",
-			deleted, keyType, group, maxTargets)
+			deleted, keyType, group, totalRecords - deleted)
 	}
 
 	return nil
