@@ -9,6 +9,7 @@ import (
 	"github.com/metacubex/mihomo/adapter/outboundgroup"
 	"github.com/metacubex/mihomo/common/utils"
 	"github.com/metacubex/mihomo/component/profile/cachefile"
+	"github.com/metacubex/mihomo/component/smart"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel"
@@ -104,7 +105,7 @@ func getGroupWeights(w http.ResponseWriter, r *http.Request) {
 		log.Debugln("[Smart] Failed to request weight ranking: Not a Smart group (actual type: %T)", proxy.Adapter())
 		render.Status(r, http.StatusBadRequest)
 		render.JSON(w, r, render.M{
-			"weights": []interface{}{},
+			"weights": []smart.NodeRank{},
 			"error":   "Not a Smart group",
 		})
 		return
@@ -117,7 +118,7 @@ func getGroupWeights(w http.ResponseWriter, r *http.Request) {
 	if smartStore == nil {
 		render.Status(r, http.StatusServiceUnavailable)
 		render.JSON(w, r, render.M{
-			"weights": []interface{}{},
+			"weights": []smart.NodeRank{},
 			"error":   "Smart cache not available",
 		})
 		return
@@ -128,7 +129,7 @@ func getGroupWeights(w http.ResponseWriter, r *http.Request) {
 		log.Warnln("[Smart] Failed to get weight ranking: %s", err.Error())
 		render.Status(r, http.StatusInternalServerError)
 		render.JSON(w, r, render.M{
-			"weights": []interface{}{},
+			"weights": []smart.NodeRank{},
 			"error":   "Failed to get weight ranking: " + err.Error(),
 		})
 		return
@@ -137,7 +138,7 @@ func getGroupWeights(w http.ResponseWriter, r *http.Request) {
 	if len(weights) == 0 {
 		log.Debugln("Policy group %s has no weight data", groupName)
 		render.JSON(w, r, render.M{
-			"weights": []interface{}{},
+			"weights": []smart.NodeRank{},
 			"message": "No weight data available for the specified group",
 		})
 		return
@@ -153,14 +154,14 @@ func getAllGroupWeights(w http.ResponseWriter, r *http.Request) {
 	if smartStore == nil {
 		render.Status(r, http.StatusServiceUnavailable)
 		render.JSON(w, r, render.M{
-			"weights": map[string][]interface{}{},
+			"weights": map[string][]smart.NodeRank{},
 			"errors":  map[string]string{},
 			"error":   "Smart cache not available",
 		})
 		return
 	}
 
-	result := make(map[string][]interface{})
+	result := make(map[string][]smart.NodeRank)
 	errorsMap := make(map[string]string)
 
 	var (
@@ -192,11 +193,7 @@ func getAllGroupWeights(w http.ResponseWriter, r *http.Request) {
 				errorsMap[groupName] = err.Error()
 				return
 			}
-			weightsAny := make([]interface{}, len(weights))
-			for i, w := range weights {
-				weightsAny[i] = w
-			}
-			result[groupName] = weightsAny
+			result[groupName] = weights
 		}(groupName, configName)
 	}
 
@@ -205,7 +202,7 @@ func getAllGroupWeights(w http.ResponseWriter, r *http.Request) {
 	if len(result) == 0 && len(errorsMap) == 0 {
 		render.Status(r, http.StatusInternalServerError)
 		render.JSON(w, r, render.M{
-			"weights": map[string][]interface{}{},
+			"weights": map[string][]smart.NodeRank{},
 			"message": "No Smart groups or no weight data available",
 		})
 		return

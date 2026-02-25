@@ -1281,10 +1281,9 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 		}
 
 		type targetInfo struct {
-			keyType string
-			target  string
-			time    time.Time
-			value   float64
+			time   time.Time
+			value  float64
+			target string
 		}
 		targetMap := make(map[string]*targetInfo)
 
@@ -1300,6 +1299,9 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			var value float64
 			switch keyType {
 			case KeyTypeStats:
+				if len(parts) < 6 {
+					continue
+				}
 				var record StatsRecord
 				if err := json.Unmarshal(data, &record); err != nil {
 					continue
@@ -1326,29 +1328,20 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 				continue
 			}
 
-			// stats has multiple entries per target (per node), need to aggregate
-			if info, exists := targetMap[target]; exists {
-				if lastTime > info.time.Unix() {
-					info.time = time.Unix(lastTime, 0)
-				}
-				info.value += value
-			} else {
-				targetMap[target] = &targetInfo{
-					keyType: keyType,
-					target:  target,
-					time:    time.Unix(lastTime, 0),
-					value:   value,
-				}
+			targetMap[path] = &targetInfo{
+				time:   time.Unix(lastTime, 0),
+				value:  value,
+				target: target,
 			}
 		}
 
-		var invalidTargets []targetInfo
-		var validTargets []targetInfo
-		for _, info := range targetMap {
+		var invalidTargets []string
+		var validTargets []string
+		for path, info := range targetMap {
 			if info.time.Unix() <= 0 {
-				invalidTargets = append(invalidTargets, *info)
+				invalidTargets = append(invalidTargets, path)
 			} else {
-				validTargets = append(validTargets, *info)
+				validTargets = append(validTargets, path)
 			}
 		}
 
@@ -1360,13 +1353,13 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 		toDeleteCount := totalRecords - maxTargets + maxTargets / 4
 		deleted := 0
 
-		for _, info := range invalidTargets {
+		for _, path := range invalidTargets {
 			if deleted >= toDeleteCount {
 				break
 			}
-			deleteKey := FormatDBKey(info.keyType, config, group, info.target)
-			if delErr := s.DBBatchDeletePrefix(deleteKey, false); delErr != nil {
-				log.Debugln("[SmartStore] Failed to clean invalid [%s] for keyType [%s], group [%s]: %v", info.target, info.keyType, group, delErr)
+			info := targetMap[path]
+			if delErr := s.DBBatchDeletePrefix(path, false); delErr != nil {
+				log.Debugln("[SmartStore] Failed to clean invalid [%s] for keyType [%s], group [%s]: %v", info.target, keyType, group, delErr)
 				continue
 			}
 			deleted++
@@ -1375,16 +1368,18 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 		if deleted < toDeleteCount {
 			remaining := toDeleteCount - deleted
 			sort.Slice(validTargets, func(i, j int) bool {
-				if validTargets[i].value != validTargets[j].value {
-					return validTargets[i].value < validTargets[j].value
+				infoI := targetMap[validTargets[i]]
+				infoJ := targetMap[validTargets[j]]
+				if infoI.value != infoJ.value {
+					return infoI.value < infoJ.value
 				}
-				return validTargets[i].time.Before(validTargets[j].time)
+				return infoI.time.Before(infoJ.time)
 			})
 			for i := 0; i < remaining && i < len(validTargets); i++ {
-				info := validTargets[i]
-				deleteKey := FormatDBKey(info.keyType, config, group, info.target)
-				if delErr := s.DBBatchDeletePrefix(deleteKey, false); delErr != nil {
-					log.Debugln("[SmartStore] Failed to clean valid [%s] for keyType [%s], group [%s]: %v", info.target, info.keyType, group, delErr)
+				path := validTargets[i]
+				info := targetMap[path]
+				if delErr := s.DBBatchDeletePrefix(path, false); delErr != nil {
+					log.Debugln("[SmartStore] Failed to clean valid [%s] for keyType [%s], group [%s]: %v", info.target, keyType, group, delErr)
 					continue
 				}
 				deleted++
