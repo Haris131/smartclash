@@ -324,7 +324,7 @@ func (s *Smart) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (
 
 	availableProxies = s.selectProxies(metadata, proxies, false)
 	
-	for i := 0; i < len(availableProxies); i++ {
+	for i := 0; i < len(availableProxies) && i < 3; i++ {
 		proxy = availableProxies[i]
 		historyConnectTime := s.getHistoryConnectStats(metadata, proxy)
 		var timeout time.Duration
@@ -347,9 +347,6 @@ func (s *Smart) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (
 		}
 		finalErr = err
 		go s.recordConnectionStats("failed", metadata, proxy, connectTime, 0, 0, 0, 0, 0, 0, err)
-		if s.selected != "" && len(availableProxies) == 1 && availableProxies[0].Name() == s.selected {
-			break
-		}
 	}
 
 	return nil, finalErr
@@ -610,6 +607,7 @@ func (s *Smart) fillProxies(names []string, weights []float64, all []C.Proxy, mi
 	}
 
 	if len(selected) == 0 {
+		indexes = rand.Perm(len(all))
 		for _, idx := range indexes {
 			selected = append(selected, filteredAll[idx])
 			if len(selected) >= minCount {
