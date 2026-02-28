@@ -478,16 +478,7 @@ func (s *Smart) MarshalJSON() ([]byte, error) {
 }
 
 func (s *Smart) fillProxies(names []string, weights []float64, all []C.Proxy, minCount int, isUDP bool, wildcardTarget string) []C.Proxy {
-	stateData, _ := s.store.GetNodeStates(s.Name(), s.configName)
-	blockedNodes := make(map[string]bool)
-	for nodeName, data := range stateData {
-		var state smart.NodeState
-		if json.Unmarshal(data, &state) == nil {
-			if state.BlockedUntil > 0 && state.BlockedUntil > time.Now().Unix() {
-				blockedNodes[nodeName] = true
-			}
-		}
-	}
+	blockedNodes, _ := s.store.GetBlockedNodes(s.Name(), s.configName)
 
 	proxyByName := make(map[string]C.Proxy)
 	for _, p := range all {
@@ -609,9 +600,19 @@ func (s *Smart) fillProxies(names []string, weights []float64, all []C.Proxy, mi
 	if len(selected) == 0 {
 		indexes = rand.Perm(len(all))
 		for _, idx := range indexes {
-			selected = append(selected, filteredAll[idx])
+			if all[idx].AliveForTestUrl(s.testUrl) {
+				selected = append(selected, all[idx])
+			}
 			if len(selected) >= minCount {
 				break
+			}
+		}
+		if len(selected) == 0 {
+			for _, idx := range indexes {
+				selected = append(selected, all[idx])
+				if len(selected) >= minCount {
+					break
+				}
 			}
 		}
 	}
@@ -911,7 +912,7 @@ func (s *Smart) checkAndRecoverDegradedNodes() {
 			continue
 		}
 
-		var shouldUpdate bool = false
+		var shouldUpdate bool
 
 		if state.BlockedUntil > 0 && state.BlockedUntil > time.Now().Unix() {
 			state.BlockedUntil = 0
@@ -920,22 +921,15 @@ func (s *Smart) checkAndRecoverDegradedNodes() {
 		}
 
 		if state.Degraded {
-			var recoveryFactor float64
-			var shouldRecover bool
-
 			if state.BlockedUntil == 0 {
-				recoveryFactor = math.Min(1.0, state.DegradedFactor + 0.01)
-				shouldRecover = true
-				state.FailureCount = int(float64(state.FailureCount) * 0.95)
-			}
-
-			if shouldRecover {
+				recoveryFactor := math.Min(1.0, state.DegradedFactor+0.01)
 				shouldUpdate = true
+				state.FailureCount = int(float64(state.FailureCount) * 0.95)
+
 				if recoveryFactor >= 0.99 {
 					state.Degraded = false
 					state.DegradedFactor = 1.0
 				} else {
-					state.Degraded = true
 					state.DegradedFactor = recoveryFactor
 				}
 			}
@@ -1022,6 +1016,10 @@ func (s *Smart) handleFailedConnection(proxyName string, oldWeight, calculatedWe
 			Node:   proxyName,
 			Data:   nodeStateBytes,
 		})
+	}
+
+	if block {
+		smart.ClearBlockedNodesCache(s.Name(), s.configName)
 	}
 
 	return updateAverageValueFloat(oldWeight, calculatedWeight * nodeState.DegradedFactor, false), block

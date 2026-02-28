@@ -217,19 +217,43 @@ func (r *AtomicStatsRecord) Add(field string, value interface{}) {
 	switch field {
 	case "success":
 		if v, ok := value.(int64); ok {
-			r.success.Add(v)
+			current := r.success.Load()
+			if v > 0 && current > math.MaxInt64/2-v {
+				r.success.Store(math.MaxInt64 / 4)
+			} else {
+				r.success.Add(v)
+			}
 		}
 	case "failure":
 		if v, ok := value.(int64); ok {
-			r.failure.Add(v)
+			current := r.failure.Load()
+			if v > 0 && current > math.MaxInt64/2-v {
+				r.failure.Store(math.MaxInt64 / 4)
+			} else {
+				r.failure.Add(v)
+			}
 		}
 	case "uploadTotal":
 		if v, ok := value.(float64); ok {
-			r.uploadTotal.Add(v)
+			current := r.uploadTotal.Load()
+			// 1PB (1024^5 bytes)
+			const maxUpload = 1125899906842624.0
+			if current+v > maxUpload {
+				r.uploadTotal.Store(maxUpload / 2)
+			} else {
+				r.uploadTotal.Add(v)
+			}
 		}
 	case "downloadTotal":
 		if v, ok := value.(float64); ok {
-			r.downloadTotal.Add(v)
+			current := r.downloadTotal.Load()
+			// 1PB (1024^5 bytes)
+			const maxDownload = 1125899906842624.0
+			if current+v > maxDownload {
+				r.downloadTotal.Store(maxDownload / 2)
+			} else {
+				r.downloadTotal.Add(v)
+			}
 		}
 	}
 }
@@ -675,16 +699,7 @@ func (s *Store) GetActiveTargets(group, config string, limit int) []ActiveTarget
 func (s *Store) RunPrefetch(group, config string, proxyMap map[string]string) int {
 	log.Debugln("[SmartStore] Executing target and ASN pre-calculation for policy group [%s]", group)
 
-	blockedNodes := make(map[string]bool)
-	stateData, _ := s.GetNodeStates(group, config)
-	for nodeName, data := range stateData {
-		var state NodeState
-		if json.Unmarshal(data, &state) == nil {
-			if state.BlockedUntil > 0 && state.BlockedUntil > time.Now().Unix() {
-				blockedNodes[nodeName] = true
-			}
-		}
-	}
+	blockedNodes, _ := s.GetBlockedNodes(group, config)
 
 	availableProxyMap := make(map[string]string)
 	for name, value := range proxyMap {
@@ -889,6 +904,32 @@ func (s *Store) RunPrefetch(group, config string, proxyMap map[string]string) in
 	log.Infoln("[SmartStore] Prefetch completed for group [%s]: pre-calculated [%d] targets",
 		group, prefetchCount)
 	return prefetchCount
+}
+
+// GetBlockedNodes 获取被屏蔽节点
+func (s *Store) GetBlockedNodes(group, config string) (map[string]bool, error) {
+	cacheKey := FormatDBKey(config, group)
+	blockedNodes := make(map[string]bool)
+	if blockedNodes, ok := blockedNodesCache.Get(cacheKey); ok {
+		return blockedNodes, nil
+	}
+
+	stateData, err := s.GetNodeStates(group, config)
+	if err != nil {
+		return nil, err
+	}
+
+	for nodeName, data := range stateData {
+		var state NodeState
+		if json.Unmarshal(data, &state) == nil {
+			if state.BlockedUntil > 0 && state.BlockedUntil > time.Now().Unix() {
+				blockedNodes[nodeName] = true
+			}
+		}
+	}
+
+	blockedNodesCache.Set(cacheKey, blockedNodes)
+	return blockedNodes, nil
 }
 
 // GetNodeStates 获取节点状态

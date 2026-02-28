@@ -74,6 +74,8 @@ var (
 	recordCache *lru.LruCache[string, *AtomicStatsRecord]
 
 	dbResultCache *lru.LruCache[string, map[string][]byte]
+
+	blockedNodesCache *lru.LruCache[string, map[string]bool]
 )
 
 var CdnASNs = map[string]bool{
@@ -129,7 +131,6 @@ type (
 		MaxDownloadRate    float64            `json:"max_download_rate"`
 		ConnectionDuration float64            `json:"connection_duration"`
 		Degraded           bool               `json:"degraded"`
-		Status             map[string]bool    `json:"status"`
 	}
 
 	ModelInput struct {
