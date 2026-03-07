@@ -104,6 +104,14 @@ var CdnASNs = map[string]bool{
 	"396982": true, // Leaseweb CDN
 	"16276":  true, // OVH CDN
 	"30081":  true, // CacheFly
+	"12389":  true, // Zenlayer (跨境CDN)
+	"37888":  true, // Alibaba CDN
+	"45090":  true, // Tencent CDN
+	"174":    true, // Cogent Communications (CDN)
+	"3356":   true, // Level 3 Communications (CDN)
+	"3209":   true, // Vodafone (CDN服务)
+	"14061":  true, // DigitalOcean
+	"8452":   true, // Infospace
 }
 
 type (
@@ -204,8 +212,8 @@ type (
 		RefUDP string    `json:"ref_udp,omitempty"`
 	}
 
-	TargetFailureStats struct {
-		FailureCount int  `json:"failure_count"`
+	TargetStatus struct {
+		FailureCount int    `json:"failure_count"`
 		LastFailure  int64  `json:"last_failure"`
 		Blocked	     bool   `json:"blocked"`
 	}

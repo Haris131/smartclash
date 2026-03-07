@@ -340,7 +340,7 @@ func (p *Proxy) StatusTest(ctx context.Context, rawURL string) (status uint16, o
 
 	fingerprint, ok2 := tls.GetFingerprint("chrome")
 	if !ok2 {
-		fingerprint = tls.HelloChrome_Auto
+		return 1, false, fmt.Errorf("failed to get TLS fingerprint")
 	}
 
 	transport := &http.Transport{
