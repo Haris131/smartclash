@@ -972,7 +972,6 @@ func (s *Store) GetStatsForTarget(group, config, target, proxy string) (map[stri
 	if proxy != "" {
 		for _, data := range rawResult {
 			result[proxy] = data
-			break
 		}
 	} else {
 		for fullPath, data := range rawResult {
@@ -1094,18 +1093,40 @@ func (s *Store) GetAllNodesForGroup(group, config string) ([]string, error) {
 	return result, nil
 }
 
-// 目标失败次数统计
-func (s *Store) GetTargetFailureStats(group, config, target string) (map[string][]byte, error) {
+// 目标失败屏蔽
+func (s *Store) TargetBlocked(group, config, target string) bool {
 	pathPrefix := FormatDBKey(KeyTypeTargetFailures, config, group, target)
 	rawResult, err := s.GetSubBytesByPath(pathPrefix)
 	if err != nil {
-		return nil, err
+		return false
 	}
 
-	return rawResult, nil
+	for _, data := range rawResult {
+		var stats TargetStatus
+		if err := json.Unmarshal(data, &stats); err != nil {
+			return false
+		}
+		return stats.Blocked
+	}
+
+	return false
 }
 
-func (s *Store) UpdateTargetFailureStats(group, config, target string, failureCount int, stats TargetFailureStats, blocked bool) {
+func (s *Store) UpdateTargetStatus(group, config, target string, failureCount int, maxFailedTimes int) {
+	pathPrefix := FormatDBKey(KeyTypeTargetFailures, config, group, target)
+	rawResult, err := s.GetSubBytesByPath(pathPrefix)
+	if err != nil {
+		return
+	}
+
+	var stats TargetStatus
+
+	for _, data := range rawResult {
+		if err := json.Unmarshal(data, &stats); err != nil {
+			break
+		}
+	}
+
 	if failureCount <= 0 && stats.FailureCount <= 0 {
 		return
 	}
@@ -1114,10 +1135,11 @@ func (s *Store) UpdateTargetFailureStats(group, config, target string, failureCo
 	if failureCount > 0 {
 		stats.LastFailure = time.Now().Unix()
 	}
-	if blocked {
-		stats.Blocked = blocked
+
+	if stats.FailureCount >= maxFailedTimes {
+		stats.Blocked = true
 	}
-	
+
 	data, err := json.Marshal(stats)
 	if err != nil {
 		return
@@ -1344,7 +1366,7 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 				lastTime = pm.UpdatedTime
 				value = float64(len(pm.TCP.Nodes) + len(pm.UDP.Nodes))
 			case KeyTypeTargetFailures:
-				var stats TargetFailureStats
+				var stats TargetStatus
 				if err := json.Unmarshal(data, &stats); err != nil {
 					continue
 				}
