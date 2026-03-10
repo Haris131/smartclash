@@ -47,6 +47,7 @@ const (
 	AnyTLS
 	Sudoku
 	Masque
+	TrustTunnel
 )
 
 const (
@@ -163,7 +164,7 @@ type Proxy interface {
 	ExtraDelayHistories() map[string]ProxyState
 	LastDelayForTestUrl(url string) uint16
 	URLTest(ctx context.Context, url string, expectedStatus utils.IntRanges[uint16]) (uint16, error)
-	StatusTest(ctx context.Context, url string, expectedStatus utils.IntRanges[uint16]) (status uint16, ok bool, err error)
+	StatusTest(ctx context.Context, url string) (status uint16, ok bool, err error)
 }
 
 // AdapterType is enum of adapter type
@@ -217,6 +218,8 @@ func (at AdapterType) String() string {
 		return "Sudoku"
 	case Masque:
 		return "Masque"
+	case TrustTunnel:
+		return "TrustTunnel"
 	case Relay:
 		return "Relay"
 	case Selector:

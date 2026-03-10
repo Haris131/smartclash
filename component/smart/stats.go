@@ -36,7 +36,6 @@ type AtomicStatsRecord struct {
 	maxUploadRate   atomic.Float64
 	maxDownloadRate atomic.Float64
 
-	status          *lru.LruCache[string, bool]
 	weights         *lru.LruCache[string, float64]
 }
 
@@ -84,7 +83,6 @@ func (s *Store) GetOrCreateAtomicRecord(cacheKey string, group, config, target, 
 
 	record := &AtomicStatsRecord{
 		weights:         lru.New[string, float64](lru.WithSize[string, float64](100)),
-		status:          lru.New[string, bool](lru.WithSize[string, bool](100)),
 	}
 
 	if existingData, err := s.GetStatsForTarget(group, config, target, proxy); err == nil {
@@ -106,11 +104,6 @@ func (s *Store) GetOrCreateAtomicRecord(cacheKey string, group, config, target, 
 						record.weights.Set(k, v)
 					}
 				}
-				if existingRecord.Status != nil {
-                    for k, v := range existingRecord.Status {
-                        record.status.Set(k, v)
-                    }
-                }
 			}
 		}
 	}
@@ -137,7 +130,6 @@ func (record *AtomicStatsRecord) CreateStatsSnapshot() *StatsRecord {
 		MaxDownloadRate:    record.maxDownloadRate.Load(),
 		ConnectionDuration: record.duration.Load(),
 		Weights:            record.weights.FilterByKeyPrefix(""),
-		Status:             record.status.FilterByKeyPrefix(""),
 	}
 }
 
@@ -165,8 +157,6 @@ func (r *AtomicStatsRecord) Get(field string) interface{} {
 		return r.maxDownloadRate.Load()
 	case "duration":
 		return r.duration.Load()
-	case "status":
-		return r.status.FilterByKeyPrefix("")
 	default:
 		return nil
 	}
@@ -193,12 +183,6 @@ func (r *AtomicStatsRecord) Set(field string, value interface{}) {
 	case "lastUsed":
 		if v, ok := value.(int64); ok {
 			r.lastUsed.Store(v)
-		}
-	case "status":
-		if v, ok := value.(map[string]bool); ok {
-			for k, val := range v {
-				r.status.Set(k, val)
-			}
 		}
 	case "uploadTotal":
 		if v, ok := value.(float64); ok {
@@ -233,19 +217,43 @@ func (r *AtomicStatsRecord) Add(field string, value interface{}) {
 	switch field {
 	case "success":
 		if v, ok := value.(int64); ok {
-			r.success.Add(v)
+			current := r.success.Load()
+			if v > 0 && current > math.MaxInt64/2-v {
+				r.success.Store(math.MaxInt64 / 4)
+			} else {
+				r.success.Add(v)
+			}
 		}
 	case "failure":
 		if v, ok := value.(int64); ok {
-			r.failure.Add(v)
+			current := r.failure.Load()
+			if v > 0 && current > math.MaxInt64/2-v {
+				r.failure.Store(math.MaxInt64 / 4)
+			} else {
+				r.failure.Add(v)
+			}
 		}
 	case "uploadTotal":
 		if v, ok := value.(float64); ok {
-			r.uploadTotal.Add(v)
+			current := r.uploadTotal.Load()
+			// 1PB (1024^5 bytes)
+			const maxUpload = 1125899906842624.0
+			if current+v > maxUpload {
+				r.uploadTotal.Store(maxUpload / 2)
+			} else {
+				r.uploadTotal.Add(v)
+			}
 		}
 	case "downloadTotal":
 		if v, ok := value.(float64); ok {
-			r.downloadTotal.Add(v)
+			current := r.downloadTotal.Load()
+			// 1PB (1024^5 bytes)
+			const maxDownload = 1125899906842624.0
+			if current+v > maxDownload {
+				r.downloadTotal.Store(maxDownload / 2)
+			} else {
+				r.downloadTotal.Add(v)
+			}
 		}
 	}
 }
@@ -430,14 +438,12 @@ func (s *Store) StoreNodeWeightRanking(group, config string, ranking []NodeRank)
 		return
 	}
 
-	appendToGlobalQueue(StoreOperation{
+	s.AppendToGlobalQueue(StoreOperation{
 		Type:   OpSaveRanking,
 		Group:  group,
 		Config: config,
 		Data:   data,
 	})
-
-	go s.FlushQueue(false)
 }
 
 // 获取目标的最佳代理
@@ -693,16 +699,7 @@ func (s *Store) GetActiveTargets(group, config string, limit int) []ActiveTarget
 func (s *Store) RunPrefetch(group, config string, proxyMap map[string]string) int {
 	log.Debugln("[SmartStore] Executing target and ASN pre-calculation for policy group [%s]", group)
 
-	blockedNodes := make(map[string]bool)
-	stateData, _ := s.GetNodeStates(group, config)
-	for nodeName, data := range stateData {
-		var state NodeState
-		if json.Unmarshal(data, &state) == nil {
-			if state.BlockedUntil > 0 && state.BlockedUntil > time.Now().Unix() {
-				blockedNodes[nodeName] = true
-			}
-		}
-	}
+	blockedNodes, _ := s.GetBlockedNodes(group, config)
 
 	availableProxyMap := make(map[string]string)
 	for name, value := range proxyMap {
@@ -909,6 +906,32 @@ func (s *Store) RunPrefetch(group, config string, proxyMap map[string]string) in
 	return prefetchCount
 }
 
+// GetBlockedNodes 获取被屏蔽节点
+func (s *Store) GetBlockedNodes(group, config string) (map[string]bool, error) {
+	cacheKey := FormatDBKey(config, group)
+	blockedNodes := make(map[string]bool)
+	if blockedNodes, ok := blockedNodesCache.Get(cacheKey); ok {
+		return blockedNodes, nil
+	}
+
+	stateData, err := s.GetNodeStates(group, config)
+	if err != nil {
+		return nil, err
+	}
+
+	for nodeName, data := range stateData {
+		var state NodeState
+		if json.Unmarshal(data, &state) == nil {
+			if state.BlockedUntil > 0 && state.BlockedUntil > time.Now().Unix() {
+				blockedNodes[nodeName] = true
+			}
+		}
+	}
+
+	blockedNodesCache.Set(cacheKey, blockedNodes)
+	return blockedNodes, nil
+}
+
 // GetNodeStates 获取节点状态
 func (s *Store) GetNodeStates(group, config string) (map[string][]byte, error) {
 	pathPrefix := FormatDBKey(KeyTypeNode, config, group)
@@ -949,7 +972,6 @@ func (s *Store) GetStatsForTarget(group, config, target, proxy string) (map[stri
 	if proxy != "" {
 		for _, data := range rawResult {
 			result[proxy] = data
-			break
 		}
 	} else {
 		for fullPath, data := range rawResult {
@@ -1071,39 +1093,69 @@ func (s *Store) GetAllNodesForGroup(group, config string) ([]string, error) {
 	return result, nil
 }
 
-// 目标失败次数统计
-func (s *Store) GetTargetFailureStats(group, config, target string) (map[string][]byte, error) {
+// 目标失败屏蔽
+func (s *Store) TargetBlocked(group, config, target string) bool {
 	pathPrefix := FormatDBKey(KeyTypeTargetFailures, config, group, target)
 	rawResult, err := s.GetSubBytesByPath(pathPrefix)
 	if err != nil {
-		return nil, err
+		return false
 	}
 
-	return rawResult, nil
+	for _, data := range rawResult {
+		var stats TargetStatus
+		if err := json.Unmarshal(data, &stats); err != nil {
+			return false
+		}
+		return stats.Blocked
+	}
+
+	return false
 }
 
-func (s *Store) UpdateTargetFailureStats(group, config, target string, failureCount int64, stats TargetFailureStats) {
+func (s *Store) UpdateTargetStatus(group, config, target string, failureCount int, maxFailedTimes int) {
+	pathPrefix := FormatDBKey(KeyTypeTargetFailures, config, group, target)
+	rawResult, err := s.GetSubBytesByPath(pathPrefix)
+	if err != nil {
+		return
+	}
+
+	var stats TargetStatus
+
+	for _, data := range rawResult {
+		if err := json.Unmarshal(data, &stats); err != nil {
+			break
+		}
+	}
+
 	if failureCount <= 0 && stats.FailureCount <= 0 {
 		return
 	}
 
 	stats.FailureCount += failureCount
-	stats.LastFailure = time.Now().Unix()
-	
+	if failureCount > 0 {
+		stats.LastFailure = time.Now().Unix()
+	}
+
+	if stats.FailureCount >= maxFailedTimes {
+		stats.Blocked = true
+	}
+
+	if stats.FailureCount <= 0 {
+		stats.Blocked = false
+	}
+
 	data, err := json.Marshal(stats)
 	if err != nil {
 		return
 	}
 
-	appendToGlobalQueue(StoreOperation{
+	s.AppendToGlobalQueue(StoreOperation{
 		Type:   OpSaveTargetFailures,
 		Group:  group,
 		Config: config,
 		Target: target,
 		Data:   data,
 	})
-
-	go s.FlushQueue(false)
 }
 
 // 移除节点数据
@@ -1281,9 +1333,10 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 		}
 
 		type targetInfo struct {
-			time   time.Time
-			value  float64
-			target string
+			time    time.Time
+			value   float64
+			target  string
+			blocked bool
 		}
 		targetMap := make(map[string]*targetInfo)
 
@@ -1297,6 +1350,7 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			// 优先保留使用频率高和最近使用的记录
 			var lastTime int64
 			var value float64
+			var blocked bool
 			switch keyType {
 			case KeyTypeStats:
 				if len(parts) < 6 {
@@ -1317,10 +1371,11 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 				value = float64(len(pm.TCP.Nodes) + len(pm.UDP.Nodes))
 				maxTargets = maxTargets / 2
 			case KeyTypeTargetFailures:
-				var stats TargetFailureStats
+				var stats TargetStatus
 				if err := json.Unmarshal(data, &stats); err != nil {
 					continue
 				}
+				blocked = stats.Blocked
 				lastTime = stats.LastFailure
 				value = float64(stats.FailureCount)
 				maxTargets = maxTargets / 2
@@ -1329,9 +1384,10 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			}
 
 			targetMap[path] = &targetInfo{
-				time:   time.Unix(lastTime, 0),
-				value:  value,
-				target: target,
+				time:    time.Unix(lastTime, 0),
+				value:   value,
+				target:  target,
+				blocked: blocked,
 			}
 		}
 
@@ -1370,6 +1426,9 @@ func (s *Store) CleanupOldRecords(group, config string) error {
 			sort.Slice(validTargets, func(i, j int) bool {
 				infoI := targetMap[validTargets[i]]
 				infoJ := targetMap[validTargets[j]]
+				if infoI.blocked != infoJ.blocked {
+					return !infoI.blocked && infoJ.blocked
+				}
 				if infoI.value != infoJ.value {
 					return infoI.value < infoJ.value
 				}
