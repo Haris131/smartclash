@@ -508,12 +508,12 @@ func (s *Smart) fillProxies(metadata *C.Metadata, names []string, weights []floa
 		return selected, true
 	}
 
+	if len(selected) >= len(all) {
+		return selected, false
+	}
+
 	if len(selected) >= minCount {
-		ratio := float64(len(names)) / float64(len(all))
-		blockEnabled := s.store.TargetBlocked(s.Name(), s.configName, smart.GetEffectiveTarget(metadata.Host, metadata.DstIP.String()))
-		if rand.Float64() < ratio || blockEnabled {
-			return selected[:minCount], false
-		}
+		return selected[:minCount], false
 	}
 
 	var indexes []int
@@ -547,7 +547,7 @@ func (s *Smart) fillProxies(metadata *C.Metadata, names []string, weights []floa
 			}
 			return factorI > factorJ
 		})
-		
+
 		indexes = make([]int, len(filteredAll))
 		for i := range indexes {
 			indexes[i] = i

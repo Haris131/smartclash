@@ -1140,6 +1140,10 @@ func (s *Store) UpdateTargetStatus(group, config, target string, failureCount in
 		stats.Blocked = true
 	}
 
+	if stats.FailureCount <= 0 {
+		stats.Blocked = false
+	}
+
 	data, err := json.Marshal(stats)
 	if err != nil {
 		return
